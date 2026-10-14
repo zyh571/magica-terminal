@@ -1,0 +1,995 @@
+#!/usr/bin/env python3
+"""Magica Terminal — a small VTE terminal where every pane belongs to a Puella Magi character.
+
+Each pane is a VTE terminal with a transparent background layered over a backdrop that draws the
+character's HELLO! GOOD SMILE figure in the bottom-right corner, drawn in front of the text. Text, cursor and selection use her
+colour. Unfocused panes keep their colours, just less saturated.
+
+Keys
+  Ctrl+Shift+O / Ctrl+Shift+E   split right / split down
+  Ctrl+Shift+W                  close pane
+  Ctrl+Alt+Arrows               move focus between panes
+  Ctrl+Shift+T                  new tab          Ctrl+PageUp / PageDown   previous / next tab
+  Ctrl+Shift+C / Ctrl+Shift+V   copy / paste
+  Ctrl+Shift+Plus / Minus / 0   bigger / smaller / reset font
+  Ctrl+Shift+L                  switch light / dark (remembered; ~/.config/magica-terminal/theme)
+  Ctrl+Shift+F                  search the scrollback (Enter older, Shift+Enter newer, Esc close)
+  Ctrl+click                    open a link or file path
+Typing `pair` (Madoka | Homura) or `magica` (Madoka, Homura above; Sayaka, Mami, Kyoko below) lays out the
+tab with those characters; the pane you typed it in becomes Madoka (in a new tab if this one is already split).
+Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
+next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
+After a while with no output or typing, she does a little idle bob or breath now and then.
+Hovering the mouse over a figure fades it so the text behind is readable.
+A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
+you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
+reports commands to the terminal with VTE's OSC 666 vte.shell.preexec / vte.shell.postexec=<status>.
+
+Settings live in the constants below; figures in figures/<name>.png next to the script.
+"""
+import colorsys
+import json
+import math
+import os
+import random
+import subprocess
+import sys
+import time
+import warnings
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("Vte", "2.91")
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango, Vte, Gio
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)   # VTE 0.78+ deprecates get_window_title
+
+FIGURES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "figures")   # next to the script (project checkout)
+THEME_FILE = os.path.expanduser("~/.config/magica-terminal/theme")   # "light", "dark" or "system"
+COLORS_FILE = os.path.expanduser("~/.config/magica-terminal/colors.sh")   # prompt colours for ~/.bashrc
+SESSION_FILE = os.path.expanduser("~/.config/magica-terminal/session.json")   # tabs / splits saved on close
+FONT = "Ubuntu Sans Mono 11"
+PADDING = 10              # px around the text
+
+# Figure size, as at full screen (1920x1080). Like Ghostty's "cover" on a 16:9 canvas, a pane keeps
+# the full-screen size while either its width or height is still full, and shrinks once both shrink.
+FIG_HEIGHT, FIG_RIGHT, FIG_BOTTOM = 240, 30, 12
+BASE_HEIGHT, BASE_GAP = 3, 4   # coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
+HOVER_OPACITY = 0.25      # figure opacity while the mouse is over it
+FAIL_FLASH = 0.5          # s the figure and the bar under it stay tinted red after a command fails (0 = off)
+FAIL_TINT = 0.5           # how much red is mixed into them
+FAIL_SQUASH = 0.15        # …and she gets squashed: this much shorter (and a bit wider) for a moment (0 = off)
+FAIL_RED = "#ff1f1f"      # a pure red, so it still shows on Kyoko (whose own colour is a pinkish red)
+IGNORED_EXIT = {130}      # exit statuses that don't count as failures (130 = Ctrl+C)
+LONG_COMMAND = 10         # s: a command running at least this long in a pane you're not looking at → she hops (0 = off)
+HOP_HEIGHT, HOPS = 22, 3  # hop height (px at full screen) and number of hops
+JUMP_HEIGHT = 20          # every successful command: one small jump of this height (px at full screen, 0 = off)
+NOTIFY = True             # …and a desktop notification when the window isn't active
+IDLE_AFTER = 15           # s without output or typing before she starts idling (0 = off)
+IDLE_EVERY = (6, 14)      # s between idle moves (random in this range)
+IDLE_BOB, IDLE_BREATH = 6, 0.04   # idle moves: a double bob this high (px) / a breath stretching her this much taller
+
+# Ctrl+click opens these (PCRE2); file paths only if they exist. Programs' own OSC 8 hyperlinks work too.
+LINK_REGEXES = [
+    r"\b(?:https?|ftp|file)://[^\s<>\"'`]*[^\s<>\"'`.,;:!?)\]}]",
+    r"\bwww\.[\w-]+\.[^\s<>\"'`]*[^\s<>\"'`.,;:!?)\]}]",
+    r"(?<![\w/~.:-])~?(?:/[\w.+@%-]*[\w+@%-])+/?",   # not ending in "." (end of a sentence)
+]
+# hot commands typed in the shell (~/.bashrc): equal splits, "h" = side by side, "v" = stacked
+LAYOUTS = {
+    "pair": ("h", ["madoka", "homura"]),
+    "magica": ("v", [("h", ["madoka", "homura"]), ("h", ["sayaka", "mami", "kyoko"])]),
+}
+FRAME_WIDTH = 0           # border around the focused pane (only shown when a tab has several panes)
+UNFOCUSED_OVERLAY = "transparent"   # optional veil over unfocused panes, e.g. "rgba(128, 128, 128, 0.18)"
+TEXT_SATURATION = 0.55    # normal text (commands, output): her colour at this fraction of the saturation
+CHAR_SLOTS = 100          # palette slots 100…117: per character name / text / path colours (3 each), 118: red accent.
+RED_SLOT = 118            # (Kyubey's grey accent) The prompt points at a character's slots, so old lines keep her colours after a switch,
+                          # and light/dark mode recolours them all.
+PATH_SATURATION = 0.4     # how washed out the path colour is
+FOCUS_BRIGHTEN = {"dark": 0.0, "light": 0.0}   # focused pane: lift the background toward white first…
+FOCUS_TINT = 0.08        # focused pane background: this much of her colour mixed in (when a tab has several panes)
+UNFOCUSED_SATURATION = 1.0    # unfocused panes keep their colours, at this fraction of the saturation
+
+# (name, icon, colour on dark, colour on light)
+CHARACTERS = [
+    ("madoka", "🎀", "#ff9cc6", "#c2386f"),
+    ("homura", "⏳", "#b9a0ff", "#6a4bb8"),
+    ("sayaka", "🎵", "#8cbcff", "#2f6fc0"),
+    ("mami", "🫖", "#f2cf6b", "#9a6f0e"),
+    ("kyoko", "🍎", "#ff7a86", "#c22f3c"),
+]
+
+# Kyubey takes over a pane while it runs a root shell (`kyubey` in ~/.bashrc). Red accents come from
+# the palette's red; a figure is used if figures/kyubey.png exists.
+KYUBEY = ("kyubey", "", "#f4f4f4", "#1f1f24")   # white on dark, black on light
+KYUBEY_GREYS = {   # name / text / path / accent ('@pmmm' and '#') — Kyubey is only white, grey and black
+    "dark": ("#f4f4f4", "#c9c9cc", "#9b9ba0", "#8a8a8f"),
+    "light": ("#1f1f24", "#46464c", "#6b6b72", "#7a7a80"),
+}
+ALL_CHARACTERS = CHARACTERS + [KYUBEY]
+
+THEMES = {   # Tiro Finale palettes (same as the Ghostty themes)
+    "dark": dict(bg="#1d1d1c", fg="#d4d2cc", dim="#7f7d78", sel_fg="#1b1a1f", palette=[
+        "#2b2b2a", "#c46a5e", "#8fa874", "#c9a54a", "#7f9bb8", "#b08aa8", "#7fada6", "#bdbbb5",
+        "#6b6a66", "#d98275", "#a5bd8a", "#e0bd5e", "#98b2cc", "#c6a0bd", "#95c2bb", "#ecebe7"]),
+    "light": dict(bg="#e9e8e4", fg="#3a3a3a", dim="#9a9893", sel_fg="#f6f5f2", palette=[
+        "#2e2e2e", "#a3473d", "#5f7a45", "#8f6d1f", "#4d6680", "#85587a", "#4f7a73", "#a8a7a2",
+        "#7c7b77", "#c0574a", "#6f8c52", "#b08a2e", "#5f7c99", "#9a6a8e", "#5f918a", "#f6f5f2"]),
+}
+
+
+def rgba(hex_colour, alpha=1.0):
+    c = Gdk.RGBA()
+    c.parse(hex_colour)
+    c.alpha = alpha
+    return c
+
+
+def desaturate(hex_colour, amount):
+    r, g, b = (int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    r, g, b = colorsys.hls_to_rgb(h, l, s * amount)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+def mix(a, b, t):
+    """Blend hex colour a toward b by fraction t."""
+    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(ca, cb))
+
+
+def xterm256(base16):
+    """Full 256-colour palette: our 16 colours, then the standard xterm cube and grey ramp."""
+    pal = list(base16)
+    steps = [0, 95, 135, 175, 215, 255]
+    pal += ["#%02x%02x%02x" % (steps[r], steps[g], steps[b]) for r in range(6) for g in range(6) for b in range(6)]
+    pal += ["#%02x%02x%02x" % ((8 + 10 * i,) * 3) for i in range(24)]
+    return pal
+
+
+def tint(pixbuf, colour, amount):
+    """A copy of pixbuf with `amount` of colour mixed into every pixel (transparency kept)."""
+    if not pixbuf.get_has_alpha():
+        pixbuf = pixbuf.add_alpha(False, 0, 0, 0)
+    w, h, stride = pixbuf.get_width(), pixbuf.get_height(), pixbuf.get_rowstride()
+    data = bytearray(pixbuf.get_pixels())
+    rgb = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
+    tables = [bytes(round(v + (c - v) * amount) for v in range(256)) for c in rgb]
+    for y in range(h):
+        row = data[y * stride:y * stride + w * 4]
+        for ch in range(3):
+            row[ch::4] = row[ch::4].translate(tables[ch])
+        data[y * stride:y * stride + w * 4] = row
+    return GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(data)), GdkPixbuf.Colorspace.RGB, True, 8, w, h, stride)
+
+
+def character_named(name):
+    return next((c for c in ALL_CHARACTERS if c[0] == name), None)
+
+
+def set_ratio(paned, ratio):
+    """Put the divider at `ratio` of the paned's size once it has one (both sides then resize proportionally)."""
+    def apply(*_):
+        a = paned.get_allocation()
+        size = a.width if paned.get_orientation() == Gtk.Orientation.HORIZONTAL else a.height
+        if size > 1:
+            paned.disconnect(handler)
+            paned.set_position(round(size * ratio))
+    handler = paned.connect("size-allocate", apply)
+
+
+def other_instance_running():
+    for d in os.listdir("/proc"):
+        if d.isdigit() and int(d) != os.getpid():
+            try:
+                with open(f"/proc/{d}/comm") as f:
+                    if f.read().strip() == "magica-terminal":
+                        return True
+            except OSError:
+                pass
+    return False
+
+
+def system_theme():
+    try:
+        scheme = Gio.Settings.new("org.gnome.desktop.interface").get_string("color-scheme")
+        return "dark" if scheme == "prefer-dark" else "light"
+    except Exception:
+        return "dark"
+
+
+def write_prompt_colours(theme):
+    """Tell the shell which palette slots belong to each character (~/.bashrc and the root prompt read this)."""
+    lines = [f"_mc_theme={theme}"]
+    for i, (name, _, _, _) in enumerate(ALL_CHARACTERS):
+        lines.append(f"_mc_{name}_name={CHAR_SLOTS + 3 * i}; _mc_{name}_text={CHAR_SLOTS + 3 * i + 1}; "
+                     f"_mc_{name}_path={CHAR_SLOTS + 3 * i + 2}")
+    lines.append(f"_mc_red={RED_SLOT}")
+    try:
+        os.makedirs(os.path.dirname(COLORS_FILE), exist_ok=True)
+        open(COLORS_FILE, "w").write("\n".join(lines) + "\n")
+    except OSError:
+        pass
+
+
+def saved_theme():
+    try:
+        t = open(THEME_FILE).read().strip()
+    except OSError:
+        t = "system"
+    return t if t in THEMES else system_theme()
+
+
+def save_theme(name):
+    try:
+        os.makedirs(os.path.dirname(THEME_FILE), exist_ok=True)
+        open(THEME_FILE, "w").write(name + "\n")
+    except OSError:
+        pass
+
+
+
+
+class Pane(Gtk.Overlay):
+    """One terminal over a backdrop with its character's figure."""
+
+    def __init__(self, app_window, cwd=None, command=None, character=None):
+        super().__init__()
+        self.win = app_window
+        t = THEMES[app_window.theme]
+        self.theme = t
+        self.focused = False
+        self._fig_key = None
+        self.stretch, self.widen = 1.0, 1.0   # figure height / width factors (breathing, squash)
+        self.load_character(character or app_window.next_character())
+
+        # layers: plain background → transparent terminal → figure pinned bottom-right (in front)
+        self.backdrop = Gtk.Box()
+        self.backdrop.get_style_context().add_class("magica-bg")
+        self.backdrop_css = Gtk.CssProvider()
+        self.backdrop.get_style_context().add_provider(self.backdrop_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+        self.add(self.backdrop)
+        self.connect("size-allocate", lambda *_: GLib.idle_add(self.update_figure))
+
+        self.term = Vte.Terminal()
+        self.term.set_font(Pango.FontDescription.from_string(FONT))
+        self.term.set_clear_background(False)          # let the backdrop show through
+        self.term.set_scrollback_lines(10000)
+        self.term.set_mouse_autohide(True)
+        self.term.set_cursor_blink_mode(Vte.CursorBlinkMode.OFF)
+        css = Gtk.CssProvider()
+        css.load_from_data(f"vte-terminal {{ padding: {PADDING}px; }}".encode())
+        self.term.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.add_overlay(self.term)
+        # figure on top of the text; clicks and scrolling pass through to the terminal
+        self.img = Gtk.Image(halign=Gtk.Align.END, valign=Gtk.Align.END)
+        self.add_overlay(self.img)
+        self.set_overlay_pass_through(self.img, True)
+        # small bar in her colour under the figure
+        self.base = Gtk.Box(halign=Gtk.Align.END, valign=Gtk.Align.END)
+        self.base.get_style_context().add_class("magica-base")
+        self.base.set_no_show_all(True)   # shown/hidden only by update_figure, never by a parent's show_all()
+        self.base_css = Gtk.CssProvider()
+        self.base.get_style_context().add_provider(self.base_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self._base_text = None
+        self.add_overlay(self.base)
+        self.set_overlay_pass_through(self.base, True)
+        # border in her colour around the focused pane
+        self.frame = Gtk.Box()
+        self.frame.get_style_context().add_class("magica-frame")
+        self.frame_css = Gtk.CssProvider()
+        self.frame.get_style_context().add_provider(self.frame_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.add_overlay(self.frame)
+        self.set_overlay_pass_through(self.frame, True)
+        # search bar (Ctrl+Shift+F), top-right
+        self.search = Gtk.SearchEntry(halign=Gtk.Align.END, valign=Gtk.Align.START, width_chars=28,
+                                      margin_top=8, margin_end=8, placeholder_text="search")
+        self.search.get_style_context().add_class("magica-search")
+        self.search_css = Gtk.CssProvider()
+        self.search.get_style_context().add_provider(self.search_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.search.set_no_show_all(True)
+        self.search.connect("search-changed", self.on_search_changed)
+        self.search.connect("key-press-event", self.on_search_key)
+        self.search.connect("focus-in-event", lambda *_: self.set_focused(True))
+        self.search.connect("focus-out-event", lambda *_: self.set_focused(False))
+        self.add_overlay(self.search)
+        # command start / end, reported by ~/.bashrc
+        self.cmd_start = None
+        self.failing = False
+        self.hovering = False
+        self.hop_offset = 0
+        self.term.connect("termprop-changed", self.on_termprop)
+        # fade the figure while the mouse is over it, so the text behind it is readable
+        self.term.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self.term.connect("motion-notify-event", self.on_motion)
+        self.term.connect("leave-notify-event", lambda *_: self.set_hovering(False))
+
+        self.term.connect("focus-in-event", lambda *_: self.set_focused(True))
+        self.term.connect("focus-out-event", lambda *_: self.set_focused(False))
+        self.term.connect("child-exited", lambda *_: self.win.close_pane(self))
+        self.term.connect("window-title-changed", self.on_title)
+        # Ctrl+click links
+        self.term.set_allow_hyperlink(True)
+        for rx in LINK_REGEXES:
+            tag = self.term.match_add_regex(Vte.Regex.new_for_match(rx, -1, 0x400), 0)   # PCRE2_MULTILINE
+            self.term.match_set_cursor_name(tag, "pointer")
+        self.term.connect("button-press-event", self.on_click)
+        # idle moves after a while without output or typing
+        self.last_activity = time.monotonic()
+        self.term.connect("contents-changed", self.touch)
+        self.term.connect("commit", self.touch)
+        if IDLE_AFTER:
+            self._idle_id = GLib.timeout_add(int(random.uniform(*IDLE_EVERY) * 1000), self.idle_tick)
+            self.connect("destroy", lambda *_: GLib.source_remove(self._idle_id))
+        self.set_focused(False)
+
+        shell = os.environ.get("SHELL", "/bin/bash")
+        self.pid = None
+        argv = command or [shell]
+        env = [f"MAGICA_CHAR={self.name}"]   # ~/.bashrc turns this into the character@place prompt
+        self.term.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.getcwd() or os.environ.get("HOME"), argv, env,
+                              GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self.on_spawned, None)
+
+    def load_character(self, character):
+        self.character = character
+        self.name, self.icon, dark_colour, light_colour = character
+        self.colour = dark_colour if self.win.theme == "dark" else light_colour
+        path = os.path.join(FIGURES, f"{self.name}.png")
+        if os.path.exists(path):
+            src = GdkPixbuf.Pixbuf.new_from_file(path)
+        else:   # no figure for this character: a 1x1 transparent placeholder
+            src = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, 1, 1)
+            src.fill(0)
+        muted = src.copy()
+        src.saturate_and_pixelate(muted, UNFOCUSED_SATURATION, False)
+        self.figure = {True: src, False: muted}
+        self._fig_key = None
+
+    def apply_theme(self):
+        """Re-colour this pane for the window's current light/dark theme."""
+        t = THEMES[self.win.theme]
+        self.theme = t
+        self.colour = self.character[2] if self.win.theme == "dark" else self.character[3]
+        self.set_focused(self.focused)
+
+    def on_click(self, term, event):
+        if event.button != 1 or not event.state & Gdk.ModifierType.CONTROL_MASK:
+            return False
+        link = term.hyperlink_check_event(event) or term.match_check_event(event)[0]
+        return bool(link) and self.open_link(link)
+
+    def open_link(self, link):
+        if link.startswith(("/", "~")):
+            path = os.path.expanduser(link)
+            if not os.path.exists(path):
+                return False
+            link = Gio.File.new_for_path(path).get_uri()
+        elif link.startswith("www."):
+            link = "http://" + link
+        try:
+            Gtk.show_uri_on_window(self.win, link, Gdk.CURRENT_TIME)
+        except GLib.Error:
+            return False
+        return True
+
+    # ── idle moves ──
+    def touch(self, *_):
+        self.last_activity = time.monotonic()
+
+    def idle_tick(self):
+        if (time.monotonic() - self.last_activity >= IDLE_AFTER and self.get_mapped() and not self.hovering
+                and not getattr(self, "_hopping", False) and not getattr(self, "_breathing", False)):
+            self.hop(IDLE_BOB, 2) if random.random() < 0.5 else self.breathe()
+        self._idle_id = GLib.timeout_add(int(random.uniform(*IDLE_EVERY) * 1000), self.idle_tick)
+        return False
+
+    def breathe(self, length=1.4):
+        self._breathing = True
+        start = time.monotonic()
+        def frame():
+            t = (time.monotonic() - start) / length
+            if t >= 1:
+                self.stretch, self._breathing = 1.0, False
+            else:
+                self.stretch = 1 + IDLE_BREATH * math.sin(math.pi * t) ** 2   # in and out smoothly
+            self.update_figure()
+            return self._breathing
+        GLib.timeout_add(16, frame)
+
+    def on_title(self, *_):
+        # typing a character's name in the shell sends the title "magica:set:<name>" (see ~/.bashrc)
+        title = self.term.get_window_title() or ""
+        if title.startswith("magica:layout:"):   # `pair` / `magica` (see ~/.bashrc); the shell already became Madoka
+            name = title[len("magica:layout:"):].strip()
+            if name in LAYOUTS:
+                GLib.idle_add(lambda: self.win.apply_layout(self, name) and False)
+            return
+        if title.startswith("magica:set:"):
+            wanted = title[len("magica:set:"):].strip().lower()
+            for c in ALL_CHARACTERS:
+                if c[0] == wanted:
+                    self.load_character(c)
+                    self.set_focused(self.focused)
+                    break
+            return
+        self.win.update_title()
+
+    def on_spawned(self, term, pid, error, *_):
+        if error is None:
+            self.pid = pid
+
+    def cwd(self):
+        try:
+            return os.readlink(f"/proc/{self.pid}/cwd")
+        except Exception:
+            return None
+
+    def apply_palette(self):
+        pal = xterm256(self.theme["palette"])
+        for i, (name, _, dark, light) in enumerate(ALL_CHARACTERS):
+            c = dark if self.win.theme == "dark" else light
+            if name == "kyubey":
+                g = KYUBEY_GREYS[self.win.theme]
+                pal[CHAR_SLOTS + 3 * i:CHAR_SLOTS + 3 * i + 3] = g[:3]
+                pal[RED_SLOT] = g[3]
+                continue
+            pal[CHAR_SLOTS + 3 * i] = c
+            pal[CHAR_SLOTS + 3 * i + 1] = desaturate(c, TEXT_SATURATION)
+            pal[CHAR_SLOTS + 3 * i + 2] = desaturate(c, PATH_SATURATION)
+        self.term.set_colors(rgba(self.theme["fg"]), rgba(self.theme["bg"], 0.0), [rgba(c) for c in pal])
+
+    def set_focused(self, focused):
+        self.focused = focused
+        self.apply_palette()
+        # program output uses the theme's neutral text colour; the prompt and typed commands are coloured
+        # by the shell itself (exact RGB from colors.sh), so they keep their colours after a character switch
+        fg = self.theme["fg"] if focused else desaturate(self.theme["fg"], UNFOCUSED_SATURATION)
+        self.term.set_color_foreground(rgba(fg))
+        self.term.set_color_bold(rgba(fg))
+        self.term.set_color_cursor(rgba(self.colour))
+        self.term.set_color_cursor_foreground(rgba(self.theme["bg"]))
+        self.term.set_color_highlight(rgba(self.colour))
+        self.term.set_color_highlight_foreground(rgba(self.theme["sel_fg"]))
+        self.update_figure()
+        if focused:
+            self.win.active = self
+            self.win.update_title()
+        return False
+
+    def update_frame(self, focused, multi):
+        """With several panes: the focused one gets a light tint of her colour (and optional border);
+        the others an optional veil."""
+        border = self.colour if (multi and focused) else "transparent"
+        veil = UNFOCUSED_OVERLAY if (multi and not focused) else "transparent"
+        if multi and focused:   # brighter than the unfocused background, then tinted with her colour
+            bg = mix(mix(self.theme["bg"], "#ffffff", FOCUS_BRIGHTEN[self.win.theme]), self.colour, FOCUS_TINT)
+        else:
+            bg = self.theme["bg"]
+        self.backdrop_css.load_from_data(f".magica-bg {{ background: {bg}; }}".encode())
+        self.frame_css.load_from_data(
+            f".magica-frame {{ border: {FRAME_WIDTH}px solid {border}; background: {veil}; }}".encode())
+
+    def on_motion(self, _, event):
+        pos = self.img.translate_coordinates(self.term, 0, 0)
+        if pos:
+            x, y = pos
+            w, h = self.img.get_allocated_width(), self.img.get_allocated_height()
+            self.set_hovering(x <= event.x < x + w and y <= event.y < y + h)
+        return False
+
+    def set_hovering(self, over):
+        self.hovering = over
+        self.update_opacity()
+
+    def update_opacity(self):
+        self.img.set_opacity(HOVER_OPACITY if self.hovering else 1.0)
+        self.base.set_opacity(HOVER_OPACITY if self.hovering else 1.0)
+
+    # ── command finished: failure flash / hop / notification ──
+    def on_termprop(self, term, name):
+        if name == Vte.TERMPROP_SHELL_PREEXEC:
+            self.cmd_start = time.monotonic()
+        elif name == Vte.TERMPROP_SHELL_POSTEXEC:
+            if self.cmd_start is None:     # empty line: nothing ran
+                return
+            took = time.monotonic() - self.cmd_start
+            self.cmd_start = None
+            ok, status = term.get_termprop_uint(name)
+            status = status if ok else 0
+            if status and status not in IGNORED_EXIT and FAIL_FLASH:
+                self.flash_failure()
+            if LONG_COMMAND and took >= LONG_COMMAND and not self.watched():
+                self.hop(HOP_HEIGHT, HOPS)
+                if NOTIFY and not self.win.is_active():
+                    self.notify(status, took)
+            elif status == 0 and JUMP_HEIGHT:
+                self.hop(JUMP_HEIGHT, 1)
+
+    def watched(self):
+        return self.focused and self.win.is_active()
+
+    def flash_failure(self):
+        self.failing = True
+        self._fail_id = getattr(self, "_fail_id", 0) + 1
+        fid = self._fail_id
+        def done():
+            if fid == self._fail_id:
+                self.failing = False
+                self.update_figure()
+            return False
+        GLib.timeout_add(int(FAIL_FLASH * 1000), done)
+        if FAIL_SQUASH:
+            self.squash()
+        self.update_figure()
+
+    def squash(self, length=0.45):
+        start = time.monotonic()
+        self._squash_id = getattr(self, "_squash_id", 0) + 1
+        sid = self._squash_id
+        def frame():
+            if sid != self._squash_id:   # a newer squash took over
+                return False
+            t = (time.monotonic() - start) / length
+            a = 0 if t >= 1 else t / 0.15 if t < 0.15 else (1 - (t - 0.15) / 0.85) ** 2   # quick squash, ease back
+            self.stretch, self.widen = 1 - FAIL_SQUASH * a, 1 + FAIL_SQUASH * 0.6 * a
+            self.update_figure()
+            return t < 1
+        GLib.timeout_add(16, frame)
+
+    def hop(self, height, hops):
+        if getattr(self, "_hopping", False):
+            return
+        self._hopping = True
+        start, length = time.monotonic(), 0.32 * hops
+        def frame():
+            t = (time.monotonic() - start) / length
+            if t >= 1:
+                self.hop_offset, self._hopping = 0, False
+            else:   # `hops` bounces, each lower than the last
+                phase = t * hops
+                self.hop_offset = height * (1 - int(phase) / hops) * 4 * (phase % 1) * (1 - phase % 1)
+            self.update_figure()
+            return self._hopping
+        GLib.timeout_add(16, frame)
+
+    def notify(self, status, took):
+        mins, secs = divmod(round(took), 60)
+        took_text = f"{mins}m {secs}s" if mins else f"{secs}s"
+        body = f"finished after {took_text}" + (f" (exit {status})" if status else "")
+        icon = os.path.join(FIGURES, f"{self.name}.png")
+        try:
+            subprocess.Popen(["notify-send", "-a", "Magica Terminal", "-i",
+                              icon if os.path.exists(icon) else "utilities-terminal", self.name.title(), body])
+        except OSError:
+            pass
+
+    # ── search ──
+    def open_search(self):
+        self.search_css.load_from_data(
+            f".magica-search {{ border: 1px solid {self.colour}; border-radius: 6px; }}".encode())
+        self.search.show()
+        self.search.grab_focus()
+
+    def close_search(self):
+        self.search.hide()
+        self.term.grab_focus()
+
+    def on_search_changed(self, entry):
+        text = entry.get_text()
+        entry.get_style_context().remove_class("error")
+        if not text:
+            self.term.search_set_regex(None, 0)
+            return
+        flags = 0x400 | (0 if any(c.isupper() for c in text) else 0x8)   # PCRE2 MULTILINE | CASELESS (smart case)
+        self.term.search_set_regex(Vte.Regex.new_for_search(GLib.Regex.escape_string(text, -1), -1, flags), 0)
+        self.term.search_set_wrap_around(True)
+        self.find(older=True)
+
+    def find(self, older):
+        found = self.term.search_find_previous() if older else self.term.search_find_next()
+        ctx = self.search.get_style_context()
+        (ctx.remove_class if found else ctx.add_class)("error")
+
+    def on_search_key(self, entry, event):
+        if event.keyval == Gdk.KEY_Escape:
+            self.close_search()
+            return True
+        if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            if entry.get_text():
+                self.find(older=not event.state & Gdk.ModifierType.SHIFT_MASK)
+            return True
+        return False
+
+    def update_figure(self):
+        w, h = self.get_allocated_width(), self.get_allocated_height()
+        if w <= 1 or h <= 1:
+            return False
+        s = max(w / 1920, h / 1080)
+        fh = max(1, round(FIG_HEIGHT * s))
+        red = FAIL_RED
+        sh = max(1, round(fh * self.stretch))   # breathing / squash change her height (and width), feet stay put
+        src = self.figure[self.focused]
+        fw = max(1, round(src.get_width() * fh / src.get_height()))
+        sw = max(1, round(fw * self.widen))
+        key = (self.focused, fh, sh, sw, self.failing, red)
+        if key != self._fig_key:
+            self._fig_key = key
+            scaled = src.scale_simple(sw, sh, GdkPixbuf.InterpType.BILINEAR)
+            self.img.set_from_pixbuf(tint(scaled, red, FAIL_TINT) if self.failing else scaled)
+            self.img.set_margin_end(max(0, round(FIG_RIGHT * s - (sw - fw) / 2)))   # widen around her centre
+            self.base.set_size_request(fw, max(round(BASE_HEIGHT * s), 1))
+            self.base.set_margin_end(round(FIG_RIGHT * s))
+            self.base.set_margin_bottom(round(BASE_GAP * s))
+        self.img.set_margin_bottom((0 if self.name == "kyubey" else round(FIG_BOTTOM * s)) + round(self.hop_offset * s))
+        # only under the focused pane's figure, or any pane's while a failure flashes
+        self.base.set_visible(BASE_HEIGHT > 0 and (self.focused or self.failing))
+        self.update_opacity()
+        colour = mix(self.colour, red, FAIL_TINT) if self.failing else self.colour
+        css = f".magica-base {{ background: {colour}; border-radius: 99px; }}"
+        if css != self._base_text:
+            self._base_text = css
+            self.base_css.load_from_data(css.encode())
+        return False
+
+
+class Window(Gtk.ApplicationWindow):
+    def __init__(self, app, command=None):
+        super().__init__(application=app, title="Magica Terminal")
+        self.theme = saved_theme()
+        self.char_index = 0          # every window starts with Madoka, then rotates
+        write_prompt_colours(self.theme)
+        self.active = None
+        self.font_scale = 1.0
+        self.set_default_size(1100, 700)
+        self.css = Gtk.CssProvider()
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self.load_css()
+        self.tabs = Gtk.Notebook()
+        self.tabs.set_scrollable(True)
+        self.tabs.set_show_border(False)
+        self.add(self.tabs)
+        self.connect("key-press-event", self.on_key)
+        self.connect("delete-event", lambda *_: self.save_session() or False)
+        if not (command is None and not other_instance_running() and self.restore_session()):
+            self.new_tab(command=command)
+
+    def next_character(self):
+        c = CHARACTERS[self.char_index % len(CHARACTERS)]
+        self.char_index += 1
+        return c
+
+    def load_css(self):
+        t = THEMES[self.theme]
+        accent = self.active.colour if self.active else t["fg"]
+        css = f"""
+            window, notebook, notebook > stack, .magica-bg {{ background: {t['bg']}; }}
+            paned > separator {{ background: {t['dim']}; min-width: 1px; min-height: 1px; }}
+            notebook > header {{ background: {t['bg']}; border-color: {t['dim']}; box-shadow: none; }}
+            notebook > header > tabs > tab {{ background: transparent; box-shadow: none; border: none; }}
+            notebook > header > tabs > tab label {{ color: {t['dim']}; }}
+            notebook > header > tabs > tab:hover label {{ color: {t['fg']}; }}
+            notebook > header > tabs > tab:checked {{ box-shadow: inset 0 -2px {accent}; }}
+            notebook > header > tabs > tab:checked label {{ color: {t['fg']}; font-weight: bold; }}
+        """
+        if css != getattr(self, "_css_text", None):     # reloaded on focus changes for the accent; skip if same
+            self._css_text = css
+            self.css.load_from_data(css.encode())
+        settings = Gtk.Settings.get_default()
+        if settings is not None:
+            settings.set_property("gtk-application-prefer-dark-theme", self.theme == "dark")
+
+    def set_theme(self, name):
+        self.theme = name
+        save_theme(name)
+        write_prompt_colours(name)
+        self.load_css()
+        for i in range(self.tabs.get_n_pages()):
+            for p in self.panes_in(self.tabs.get_nth_page(i)):
+                p.apply_theme()
+        self.update_frames()
+
+    # ── tabs ──
+    def new_tab(self, cwd=None, command=None, character=None):
+        pane = Pane(self, cwd, command, character)
+        self.add_tab(pane)
+        pane.term.grab_focus()
+        return pane
+
+    def add_tab(self, widget):
+        holder = Gtk.Box()           # each tab holds one root widget (a Pane or a Paned tree)
+        holder.pack_start(widget, True, True, 0)
+        self.tabs.append_page(holder, Gtk.Label(label=self.panes_in(widget)[0].name.title()))
+        self.tabs.set_show_tabs(self.tabs.get_n_pages() > 1)
+        holder.show_all()
+        self.tabs.set_current_page(self.tabs.page_num(holder))
+        return holder
+
+    # ── hot layouts (`pair`, `magica`) ──
+    def apply_layout(self, pane, name):
+        cwd = pane.cwd()
+        holder = next((self.tabs.get_nth_page(i) for i in range(self.tabs.get_n_pages())
+                       if pane in self.panes_in(self.tabs.get_nth_page(i))), None)
+        if holder is None:
+            return
+        if len(self.panes_in(holder)) > 1:   # already split: build it in a new tab instead of closing shells
+            first = LAYOUTS[name]
+            while not isinstance(first, str):
+                first = first[1][0]
+            pane = self.new_tab(cwd, character=character_named(first))
+            holder = self.current_holder()
+        holder.remove(pane)
+        root = self.build_layout(LAYOUTS[name], cwd, [pane])
+        holder.pack_start(root, True, True, 0)
+        holder.show_all()
+        pane.term.grab_focus()
+        self.update_title()
+
+    def build_layout(self, spec, cwd, reuse):
+        if isinstance(spec, str):
+            if reuse:   # the pane the command was typed in becomes the first character
+                p = reuse.pop()
+                if p.name != spec:
+                    p.load_character(character_named(spec))
+                    p.set_focused(p.focused)
+                return p
+            return Pane(self, cwd, character=character_named(spec))
+        orient, items = spec
+        return self.equal_split(orient, [self.build_layout(i, cwd, reuse) for i in items])
+
+    def equal_split(self, orient, widgets):
+        if len(widgets) == 1:
+            return widgets[0]
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL if orient == "h" else Gtk.Orientation.VERTICAL)
+        paned.pack1(widgets[0], True, True)
+        paned.pack2(self.equal_split(orient, widgets[1:]), True, True)
+        set_ratio(paned, 1 / len(widgets))
+        return paned
+
+    # ── session ──
+    def serialize(self, widget):
+        if isinstance(widget, Pane):
+            return {"char": widget.name, "cwd": widget.cwd()}
+        if isinstance(widget, Gtk.Paned):
+            a = widget.get_allocation()
+            horizontal = widget.get_orientation() == Gtk.Orientation.HORIZONTAL
+            size = a.width if horizontal else a.height
+            return {"orient": "h" if horizontal else "v",
+                    "ratio": widget.get_position() / size if size > 1 else 0.5,
+                    "a": self.serialize(widget.get_child1()), "b": self.serialize(widget.get_child2())}
+        return self.serialize(widget.get_children()[0])
+
+    def deserialize(self, node):
+        if "char" in node:
+            cwd = node.get("cwd")
+            char = character_named(node["char"]) if node["char"] != "kyubey" else None   # root shells aren't restored
+            return Pane(self, cwd if cwd and os.path.isdir(cwd) else None, character=char)
+        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL if node["orient"] == "h" else Gtk.Orientation.VERTICAL)
+        paned.pack1(self.deserialize(node["a"]), True, True)
+        paned.pack2(self.deserialize(node["b"]), True, True)
+        set_ratio(paned, node["ratio"])
+        return paned
+
+    def save_session(self):
+        try:
+            data = {"size": list(self.get_size()), "current": self.tabs.get_current_page(),
+                    "tabs": [self.serialize(self.tabs.get_nth_page(i)) for i in range(self.tabs.get_n_pages())]}
+            os.makedirs(os.path.dirname(SESSION_FILE), exist_ok=True)
+            with open(SESSION_FILE, "w") as f:
+                json.dump(data, f, indent=1)
+        except Exception:
+            pass
+
+    def restore_session(self):
+        try:
+            with open(SESSION_FILE) as f:
+                data = json.load(f)
+            if not data["tabs"]:
+                return False
+            self.set_default_size(*data["size"])
+            for tree in data["tabs"]:
+                self.add_tab(self.deserialize(tree))
+            self.tabs.set_current_page(min(data.get("current", 0), self.tabs.get_n_pages() - 1))
+            self.panes_in(self.current_holder())[0].term.grab_focus()
+            return True
+        except Exception:
+            while self.tabs.get_n_pages():   # half-restored: start clean
+                self.tabs.remove_page(0)
+            return False
+
+    def panes_in(self, widget):
+        if isinstance(widget, Pane):
+            return [widget]
+        if isinstance(widget, Gtk.Container):
+            return [p for c in widget.get_children() for p in self.panes_in(c)]
+        return []
+
+    def current_holder(self):
+        return self.tabs.get_nth_page(self.tabs.get_current_page())
+
+    # ── splits ──
+    def split(self, orientation):
+        old = self.active
+        if old is None:
+            return
+        parent = old.get_parent()
+        new = Pane(self, old.cwd())
+        paned = Gtk.Paned(orientation=orientation)
+        alloc = old.get_allocation()
+        size = alloc.width if orientation == Gtk.Orientation.HORIZONTAL else alloc.height
+        if isinstance(parent, Gtk.Paned):
+            first = parent.get_child1() is old
+            parent.remove(old)
+            (parent.pack1 if first else parent.pack2)(paned, True, True)
+        else:
+            parent.remove(old)
+            parent.pack_start(paned, True, True, 0)
+        paned.pack1(old, True, True)
+        paned.pack2(new, True, True)
+        paned.set_position(size // 2)
+        paned.show_all()
+        new.term.grab_focus()
+        self.update_title()
+
+    def close_pane(self, pane):
+        parent = pane.get_parent()
+        if parent is None:
+            return
+        if isinstance(parent, Gtk.Paned):
+            sibling = parent.get_child2() if parent.get_child1() is pane else parent.get_child1()
+            grand = parent.get_parent()
+            parent.remove(pane)
+            parent.remove(sibling)
+            if isinstance(grand, Gtk.Paned):
+                first = grand.get_child1() is parent
+                grand.remove(parent)
+                (grand.pack1 if first else grand.pack2)(sibling, True, True)
+            else:
+                grand.remove(parent)
+                grand.pack_start(sibling, True, True, 0)
+            sibling.show_all()
+            target = self.panes_in(sibling)[0]
+            target.term.grab_focus()
+            self.update_title()
+        else:   # last pane of the tab
+            page = self.tabs.page_num(parent)
+            self.tabs.remove_page(page)
+            if self.tabs.get_n_pages() == 0:   # every shell exited: nothing to restore next time
+                try:
+                    os.remove(SESSION_FILE)
+                except OSError:
+                    pass
+                self.destroy()
+                return
+            self.tabs.set_show_tabs(self.tabs.get_n_pages() > 1)
+            self.panes_in(self.current_holder())[0].term.grab_focus()
+        self.update_title()
+
+    def move_focus(self, dx, dy):
+        cur = self.active
+        if cur is None:
+            return
+        def centre(p):
+            x, y = p.translate_coordinates(self, 0, 0)
+            a = p.get_allocation()
+            return x + a.width / 2, y + a.height / 2, a
+        cx, cy, _ = centre(cur)
+        best, best_d = None, None
+        for p in self.panes_in(self.current_holder()):
+            if p is cur:
+                continue
+            px, py, _ = centre(p)
+            ddx, ddy = px - cx, py - cy
+            along = ddx * dx + ddy * dy
+            if along <= 0:
+                continue
+            d = along + 2 * abs(ddx * dy + ddy * dx)
+            if best_d is None or d < best_d:
+                best, best_d = p, d
+        if best:
+            best.term.grab_focus()
+
+    # ── misc ──
+    def update_title(self):
+        """Header: the terminal's own title for a single pane, "Tab N" once a tab holds several panes."""
+        holder = self.current_holder()
+        if holder is not None and self.active:
+            if len(self.panes_in(holder)) > 1:
+                self.set_title(f"Tab {self.tabs.get_current_page() + 1}")
+            else:
+                self.set_title(self.active.term.get_window_title() or "Magica Terminal")
+        self.update_tab_label()
+        self.update_frames()
+        self.load_css()
+
+    def update_frames(self):
+        for i in range(self.tabs.get_n_pages()):
+            panes = self.panes_in(self.tabs.get_nth_page(i))
+            for p in panes:
+                p.update_frame(p is self.active, len(panes) > 1)
+
+    def update_tab_label(self):
+        for i in range(self.tabs.get_n_pages()):
+            holder = self.tabs.get_nth_page(i)
+            panes = self.panes_in(holder)
+            if not panes:
+                continue
+            if len(panes) > 1:
+                text = f"Tab {i + 1}"
+            else:
+                text = panes[0].name.title()
+            self.tabs.set_tab_label_text(holder, text)
+
+    def set_font_scale(self, scale):
+        self.font_scale = scale
+        for i in range(self.tabs.get_n_pages()):
+            for p in self.panes_in(self.tabs.get_nth_page(i)):
+                p.term.set_font_scale(scale)
+
+    def on_key(self, _, event):
+        state = event.state & Gtk.accelerator_get_default_mod_mask()
+        ctrl, shift, alt = Gdk.ModifierType.CONTROL_MASK, Gdk.ModifierType.SHIFT_MASK, Gdk.ModifierType.MOD1_MASK
+        key = Gdk.keyval_to_lower(event.keyval)
+        if state == ctrl | shift:
+            actions = {
+                Gdk.KEY_o: lambda: self.split(Gtk.Orientation.HORIZONTAL),
+                Gdk.KEY_e: lambda: self.split(Gtk.Orientation.VERTICAL),
+                Gdk.KEY_w: lambda: self.active and self.close_pane(self.active),
+                Gdk.KEY_t: lambda: self.new_tab(self.active.cwd() if self.active else None),
+                Gdk.KEY_c: lambda: self.active and self.active.term.copy_clipboard_format(Vte.Format.TEXT),
+                Gdk.KEY_v: lambda: self.active and self.active.term.paste_clipboard(),
+                Gdk.KEY_plus: lambda: self.set_font_scale(self.font_scale * 1.1),
+                Gdk.KEY_equal: lambda: self.set_font_scale(self.font_scale * 1.1),
+                Gdk.KEY_underscore: lambda: self.set_font_scale(self.font_scale / 1.1),
+                Gdk.KEY_minus: lambda: self.set_font_scale(self.font_scale / 1.1),
+                Gdk.KEY_parenright: lambda: self.set_font_scale(1.0),
+                Gdk.KEY_0: lambda: self.set_font_scale(1.0),
+                Gdk.KEY_l: lambda: self.set_theme("light" if self.theme == "dark" else "dark"),
+                Gdk.KEY_f: lambda: self.active and self.active.open_search(),
+            }
+            if key in actions:
+                actions[key]()
+                return True
+        if state == ctrl | alt:
+            moves = {Gdk.KEY_Left: (-1, 0), Gdk.KEY_Right: (1, 0), Gdk.KEY_Up: (0, -1), Gdk.KEY_Down: (0, 1)}
+            if event.keyval in moves:
+                self.move_focus(*moves[event.keyval])
+                return True
+        if state == ctrl and event.keyval in (Gdk.KEY_Page_Up, Gdk.KEY_Page_Down):
+            n = self.tabs.get_n_pages()
+            step = -1 if event.keyval == Gdk.KEY_Page_Up else 1
+            self.tabs.set_current_page((self.tabs.get_current_page() + step) % n)
+            panes = self.panes_in(self.current_holder())
+            if panes:
+                panes[0].term.grab_focus()
+            return True
+        return False
+
+
+class App(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="dev.local.MagicaTerminal", flags=Gio.ApplicationFlags.NON_UNIQUE)
+
+    def do_activate(self):
+        # `magica-terminal CMD ARGS…` or `magica-terminal -e CMD ARGS…` runs CMD in the first pane (xdg-terminal-exec)
+        args = sys.argv[1:]
+        if args[:1] in (["-e"], ["--"]):
+            args = args[1:]
+        Window(self, command=args or None).show_all()
+
+
+def set_process_name(name):
+    """Show up as `magica-terminal` (not python3) in btop/top/ps: rename the process (Linux prctl PR_SET_NAME)."""
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").prctl(15, name.encode(), 0, 0, 0)
+    except Exception:
+        pass
+    GLib.set_prgname(name)
+    Gtk.Window.set_default_icon_name("utilities-terminal")   # window icon (the dock matches the .desktop via StartupWMClass)
+
+
+if __name__ == "__main__":
+    set_process_name("magica-terminal")
+    App().run(None)

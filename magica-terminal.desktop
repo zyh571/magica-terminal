@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Magica Terminal
+Comment=Terminal where every pane belongs to a Puella Magi character
+Exec=@BIN@
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+StartupWMClass=magica-terminal
