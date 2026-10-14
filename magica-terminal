@@ -53,7 +53,7 @@ PADDING = 10              # px around the text
 # Figure size, as at full screen (1920x1080). Like Ghostty's "cover" on a 16:9 canvas, a pane keeps
 # the full-screen size while either its width or height is still full, and shrinks once both shrink.
 FIG_HEIGHT, FIG_RIGHT, FIG_BOTTOM = 240, 30, 12
-BASE_HEIGHT, BASE_GAP = 3, 4   # coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
+BASE_HEIGHT, BASE_GAP = 5, 4   # coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
 HOVER_OPACITY = 0.25      # figure opacity while the mouse is over it
 FAIL_FLASH = 0.5          # s the figure and the bar under it stay tinted red after a command fails (0 = off)
 FAIL_TINT = 0.5           # how much red is mixed into them
@@ -618,7 +618,7 @@ class Pane(Gtk.Overlay):
             scaled = src.scale_simple(sw, sh, GdkPixbuf.InterpType.BILINEAR)
             self.img.set_from_pixbuf(tint(scaled, red, FAIL_TINT) if self.failing else scaled)
             self.img.set_margin_end(max(0, round(FIG_RIGHT * s - (sw - fw) / 2)))   # widen around her centre
-            self.base.set_size_request(fw, max(round(BASE_HEIGHT * s), 1))
+            self.base.set_size_request(fw, max(round(BASE_HEIGHT * s), 3))   # never thinner than 3px in small panes
             self.base.set_margin_end(round(FIG_RIGHT * s))
             self.base.set_margin_bottom(round(BASE_GAP * s))
         self.img.set_margin_bottom((0 if self.name == "kyubey" else round(FIG_BOTTOM * s)) + round(self.hop_offset * s))
