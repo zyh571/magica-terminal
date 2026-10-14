@@ -40,6 +40,11 @@ occasional bob or breath while idle.
 Closing the window saves tabs, splits, characters and folders to `~/.config/magica-terminal/session.json`; the
 next launch restores them.
 
+## Windows
+
+`windows/` holds a Windows port (Electron + xterm.js + ConPTY, with PowerShell integration). See
+[windows/README.md](windows/README.md).
+
 ## Files
 
 - `magica-terminal`: the app (single Python file; settings are the constants at the top)
