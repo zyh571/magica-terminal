@@ -17,6 +17,9 @@ Keys
   Ctrl+click                    open a link or file path
 Typing `pair` (Madoka | Homura) or `magica` (Madoka, Homura above; Sayaka, Mami, Kyoko below) lays out the
 tab with those characters; the pane you typed it in becomes Madoka (in a new tab if this one is already split).
+Typing `crush` opens Magica Crush, a pixel-art match-3 game with the soul gems, over that pane (Esc / q to go back);
+`magica-terminal --crush` does the same inside a pane, and opens a window with it from anywhere else.
+In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
@@ -28,7 +31,9 @@ reports commands to the terminal with VTE's OSC 666 vte.shell.preexec / vte.shel
 Settings live in the constants below, and ~/.config/magica-terminal/settings.json can override most of them
 (see SETTINGS); figures in figures/<name>.png next to the script.
 """
+import cairo
 import colorsys
+import itertools
 import json
 import math
 import os
@@ -68,6 +73,14 @@ NOTIFY = True             # …and a desktop notification when the window isn't 
 IDLE_AFTER = 15           # s without output or typing before she starts idling (0 = off)
 IDLE_EVERY = (6, 14)      # s between idle moves (random in this range)
 IDLE_BOB, IDLE_BREATH = 12, 0.04  # idle moves: a double bob this high (px) / a breath stretching her this much taller
+CRUSH_SIZE = 8            # `crush`: board size (cells per side)
+CRUSH_SPEED = 1.0         # …animation speed (2 = twice as fast)
+CRUSH_HINT_AFTER = 5      # …s without a move before a hint wiggles
+CRUSH_AUTOPLAY = False    # …start with autoplay on (A toggles it in the game)
+CRUSH_AUTOPLAY_DELAY = 0.6  # …s autoplay waits between moves
+CRUSH_CHAIN_LUCK = 0.4    # …chance a head dropping in during a chain copies a neighbour (so chains keep going)
+CRUSH_LUCKY_STRIPES = 0.05  # …chance it drops in already striped
+CRUSH_CHAIN_FADE = 0.72   # …both shrink this much per chain step, so chains still end
 
 # Ctrl+click opens these (PCRE2); file paths only if they exist. Programs' own OSC 8 hyperlinks work too.
 LINK_REGEXES = [
@@ -116,7 +129,8 @@ SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HE
             "FAIL_FLASH", "FAIL_TINT", "FAIL_SQUASH", "FAIL_RED", "IGNORED_EXIT", "LONG_COMMAND", "HOP_HEIGHT", "HOPS",
             "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH",
             "UNFOCUSED_OVERLAY", "TEXT_SATURATION", "PATH_SATURATION", "FOCUS_BRIGHTEN", "FOCUS_TINT",
-            "UNFOCUSED_SATURATION"]
+            "UNFOCUSED_SATURATION", "CRUSH_SIZE", "CRUSH_SPEED", "CRUSH_HINT_AFTER", "CRUSH_AUTOPLAY", "CRUSH_AUTOPLAY_DELAY",
+            "CRUSH_CHAIN_LUCK", "CRUSH_LUCKY_STRIPES", "CRUSH_CHAIN_FADE"]
 
 
 def load_settings():
@@ -283,12 +297,1014 @@ def save_theme(name):
 
 
 
+# ── crush: a match-3 game with the characters' soul gems (`crush` in the shell) ──
+
+class Tile:
+    """A head on the board. kind: index into CHARACTERS (None for a Kyubey bomb). special: None, "h" / "v" (striped:
+    clears its row / column), "wrapped" (3x3 blast), "armed" (a wrapped head that went off once and goes off again
+    after the next fall) or "bomb" (Kyubey: clears every head of one character)."""
+    _ids = itertools.count()
+
+    def __init__(self, kind, special=None):
+        self.kind, self.special, self.id = kind, special, next(Tile._ids)
+        self.born_kind = kind
+
+    def __repr__(self):
+        return f"Tile({self.kind}, {self.special})"
+
+
+class Step:
+    """One round of clearing and falling, for the widget to animate in order: transforms (heads turned special by a
+    Kyubey combo), fires (specials going off), clears, created (heads that became specials), then falls."""
+
+    def __init__(self, combo):
+        self.combo, self.score = combo, 0
+        self.transforms, self.fires, self.clears, self.created, self.falls = [], [], [], [], []
+
+
+class CrushBoard:
+    """The rules, without any drawing: grid[r][c] is a Tile (r = 0 at the top)."""
+
+    def __init__(self, size=8, kinds=5, rng=None, luck=None, stripes=None, fade=None):
+        self.n, self.kinds = size, kinds
+        self.rng = rng or random.Random()
+        self.luck = CRUSH_CHAIN_LUCK if luck is None else luck
+        self.stripes = CRUSH_LUCKY_STRIPES if stripes is None else stripes
+        self.fade = CRUSH_CHAIN_FADE if fade is None else fade
+        self.grid = self.fresh()
+
+    def cells(self):
+        return [(r, c) for r in range(self.n) for c in range(self.n)]
+
+    def at(self, p):
+        return self.grid[p[0]][p[1]]
+
+    def kind(self, r, c):
+        t = self.grid[r][c] if 0 <= r < self.n and 0 <= c < self.n else None
+        return t.kind if t is not None else None
+
+    def fresh(self):
+        """A random board with no matches and at least one move."""
+        while True:
+            self.grid = [[None] * self.n for _ in range(self.n)]
+            for r, c in self.cells():
+                banned = set()
+                if c >= 2 and self.kind(r, c - 1) == self.kind(r, c - 2):
+                    banned.add(self.kind(r, c - 1))
+                if r >= 2 and self.kind(r - 1, c) == self.kind(r - 2, c):
+                    banned.add(self.kind(r - 1, c))
+                self.grid[r][c] = Tile(self.rng.choice([k for k in range(self.kinds) if k not in banned]))
+            if self.hint():
+                return self.grid
+
+    # ── matching ──
+    def runs(self):
+        """Straight lines of 3 or more of the same character: [(cells, "h" or "v")]."""
+        runs = []
+        for horizontal in (True, False):
+            for a in range(self.n):
+                b = 0
+                while b < self.n:
+                    r, c = (a, b) if horizontal else (b, a)
+                    k, end = self.kind(r, c), b + 1
+                    while k is not None and end < self.n and self.kind(*((a, end) if horizontal else (end, a))) == k:
+                        end += 1
+                    if k is not None and end - b >= 3:
+                        runs.append(([(a, i) if horizontal else (i, a) for i in range(b, end)], "h" if horizontal else "v"))
+                    b = end
+        return runs
+
+    def groups(self):
+        """Runs that touch merge into one group (an L, T or + shape): [runs]."""
+        groups = []
+        for run in self.runs():
+            touching = [g for g in groups if any(set(run[0]) & set(r[0]) for r in g)]
+            merged = [run] + [r for g in touching for r in g]
+            groups = [g for g in groups if g not in touching] + [merged]
+        return groups
+
+    def matches_at(self, p):
+        return self.match_size(p) > 0
+
+    def match_size(self, p):
+        """How many heads the lines of 3+ through `p` hold (0 = no match there)."""
+        r, c = p
+        k = self.kind(r, c)
+        if k is None:
+            return 0
+        size = 1
+        for dr, dc in ((0, 1), (1, 0)):
+            length = 1
+            for sign in (1, -1):
+                i = 1
+                while self.kind(r + sign * dr * i, c + sign * dc * i) == k:
+                    length, i = length + 1, i + 1
+            if length >= 3:
+                size += length - 1
+        return size if size >= 3 else 0
+
+    def special_for(self, group, swap):
+        """The special a group leaves behind and where: 5+ in a line → bomb, L / T / + → wrapped, 4 → striped across
+        the match. It goes where the player moved a head, else at the crossing or the middle of the run."""
+        longest = max(group, key=lambda run: len(run[0]))
+        orientations = {o for _, o in group}
+        if len(longest[0]) >= 5:
+            special = "bomb"
+        elif len(orientations) == 2:
+            special = "wrapped"
+        elif len(longest[0]) == 4:
+            special = "v" if longest[1] == "h" else "h"
+        else:
+            return None, None
+        cells = {p for run, _ in group for p in run}
+        moved = [p for p in (swap or ()) if p in cells]
+        if moved:
+            pos = moved[0]
+        elif special == "wrapped":
+            h = {p for run, o in group if o == "h" for p in run}
+            pos = sorted(h & {p for run, o in group if o == "v" for p in run})[0]
+        else:
+            pos = longest[0][len(longest[0]) // 2]
+        if self.at(pos).special:   # don't overwrite a special: use a plain head of the group, if any
+            plain = sorted(p for p in cells if not self.at(p).special)
+            if not plain:
+                return None, None
+            pos = plain[0]
+        return special, pos
+
+    # ── specials ──
+    def effect(self, tile, p, step):
+        """Cells a special hits when it goes off."""
+        r, c = p
+        if tile.special == "h":
+            hit = [(r, i) for i in range(self.n)]
+        elif tile.special == "v":
+            hit = [(i, c) for i in range(self.n)]
+        elif tile.special in ("wrapped", "armed"):
+            hit = [(r + dr, c + dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1)]
+        else:   # a bomb set off by another special picks a character at random
+            present = sorted({t.kind for row in self.grid for t in row if t is not None and t.kind is not None})
+            kind = self.rng.choice(present) if present else None
+            hit = [q for q in self.cells() if self.at(q) is not None and self.at(q).kind == kind]
+            step.fires.append(("bomb", r, c, kind))
+            return hit
+        step.fires.append((tile.special, r, c, tile.kind))
+        return [q for q in hit if 0 <= q[0] < self.n and 0 <= q[1] < self.n]
+
+    def explode(self, start, protected, step):
+        """Clear `start`, setting off every special in the way (and every special those hit, …)."""
+        queue, cleared, fired = list(start), set(), set()
+        while queue:
+            p = queue.pop()
+            t = self.at(p)
+            if p in cleared or p in protected or t is None:
+                continue
+            if t.special and t.id not in fired:
+                fired.add(t.id)
+                queue += self.effect(t, p, step)
+                if t.special == "wrapped":   # stays, and goes off again after the fall
+                    t.special = "armed"
+                    protected.add(p)
+                    continue
+            cleared.add(p)
+        return cleared
+
+    def gravity(self, combo=0):
+        """Heads fall into the gaps and new ones drop in from above: [(tile, column, from row, to row)]. During a
+        chain (combo >= 1) the new ones are luckier, less so each step: some copy the head below or to their left,
+        and a few come striped."""
+        luck = self.luck * self.fade ** (combo - 1) if combo else 0
+        stripes = self.stripes * self.fade ** (combo - 1) if combo else 0
+        falls = []
+        for c in range(self.n):
+            column = [(r, self.grid[r][c]) for r in range(self.n) if self.grid[r][c] is not None]
+            new = self.n - len(column)
+            fresh = [None] * new
+            for i in reversed(range(new)):   # bottom up, so the head below is already known
+                below = fresh[i + 1] if i + 1 < new else (column[0][1] if column else None)
+                near = [t.kind for t in (below, self.grid[i][c - 1] if c else None) if t and t.kind is not None]
+                kind = self.rng.choice(near) if near and self.rng.random() < luck else self.rng.randrange(self.kinds)
+                fresh[i] = Tile(kind, self.rng.choice("hv") if self.rng.random() < stripes else None)
+            falls += [(t, c, i - new, i) for i, t in enumerate(fresh)]   # start above the board
+            falls += [(t, c, r, new + i) for i, (r, t) in enumerate(column) if r != new + i]
+            for r, t in enumerate(fresh + [t for _, t in column]):
+                self.grid[r][c] = t
+        return falls
+
+    # ── a turn ──
+    def resolve(self, swap=None, seeds=(), fires=(), transforms=()):
+        """Clear matches (and `seeds`), let heads fall, and repeat while anything is left to clear: [Step]."""
+        steps, combo, seeds = [], 0, set(seeds)
+        while True:
+            groups = self.groups()
+            armed = {p for p in self.cells() if self.at(p).special == "armed"}
+            if not groups and not seeds and not armed:
+                return steps
+            combo += 1
+            step = Step(combo)
+            step.fires += fires
+            step.transforms += transforms
+            fires = transforms = ()
+            protected, matched, score = set(), set(), 0
+            for group in groups:
+                score += sum(10 * len(run) * (len(run) - 1) for run, _ in group)   # 3 → 60, 4 → 120, 5 → 200, 6 → 300 …
+                matched |= {p for run, _ in group for p in run}
+                special, pos = self.special_for(group, swap)
+                if special:
+                    t = self.at(pos)
+                    t.special, t.kind = special, (None if special == "bomb" else t.kind)
+                    protected.add(pos)
+                    step.created.append((t, *pos))
+            cleared = self.explode((matched - protected) | seeds | armed, protected, step)
+            score += 20 * len(cleared - matched)   # heads cleared by specials
+            step.score = score * combo
+            step.clears = [(self.at(p), *p) for p in sorted(cleared)]
+            for r, c in cleared:
+                self.grid[r][c] = None
+            step.falls = self.gravity(combo)
+            steps.append(step)
+            swap, seeds = None, set()
+
+    def swap(self, a, b):
+        """Swap two neighbours. None if that's not a move; else the Steps it sets off."""
+        if abs(a[0] - b[0]) + abs(a[1] - b[1]) != 1:
+            return None
+        ta, tb = self.at(a), self.at(b)
+        self.grid[a[0]][a[1]], self.grid[b[0]][b[1]] = tb, ta
+        # Kyubey bomb: swapped with a head, clears every head of that character (striped / wrapped: they all turn
+        # into that special first); two bombs clear the board
+        bombs = [(t, p) for t, p in ((ta, b), (tb, a)) if t.special == "bomb"]
+        if bombs:
+            if len(bombs) == 2:
+                ta.special = tb.special = None
+                return self.resolve(seeds=self.cells(), fires=[("board", *b, None)])
+            bomb, bp = bombs[0]
+            other, op = (tb, a) if bomb is ta else (ta, b)
+            bomb.special = None
+            kind, transforms = other.kind, []
+            targets = [p for p in self.cells() if self.at(p).kind == kind]
+            if other.special in ("h", "v", "wrapped", "armed"):
+                for p in targets:
+                    t = self.at(p)
+                    if not t.special:
+                        t.special = self.rng.choice("hv") if other.special in "hv" else "wrapped"
+                        transforms.append((t, *p))
+            return self.resolve(seeds=set(targets) | {bp}, fires=[("bomb", *bp, kind)], transforms=transforms)
+        # two specials together: striped + striped → a row and a column, striped + wrapped → 3 rows and 3 columns,
+        # wrapped + wrapped → a 5x5 blast
+        if ta.special and tb.special:
+            striped = sum(t.special in ("h", "v") for t in (ta, tb))
+            if striped == 2:
+                ta.special, tb.special = ("h", "v") if a[0] == b[0] else ("v", "h")
+                return self.resolve(seeds={a, b})
+            ta.special = tb.special = None
+            r, c = b
+            if striped == 1:
+                seeds = {p for p in self.cells() if abs(p[0] - r) <= 1 or abs(p[1] - c) <= 1}
+                return self.resolve(seeds=seeds, fires=[("cross", r, c, ta.kind)])
+            seeds = {p for p in self.cells() if abs(p[0] - r) <= 2 and abs(p[1] - c) <= 2}
+            return self.resolve(seeds=seeds, fires=[("blast", r, c, ta.kind)])
+        if not (self.matches_at(a) or self.matches_at(b)):
+            self.grid[a[0]][a[1]], self.grid[b[0]][b[1]] = ta, tb
+            return None
+        return self.resolve(swap=(b, a))
+
+    def moves(self):
+        """Every pair of neighbours that makes a move, with a rough worth: heads matched, and swaps of two specials
+        or a bomb above any match."""
+        for p in self.cells():
+            for q in ((p[0], p[1] + 1), (p[0] + 1, p[1])):
+                if q[0] >= self.n or q[1] >= self.n:
+                    continue
+                tp, tq = self.at(p), self.at(q)
+                if "bomb" in (tp.special, tq.special) or (tp.special and tq.special):
+                    yield p, q, 100
+                    continue
+                self.grid[p[0]][p[1]], self.grid[q[0]][q[1]] = tq, tp
+                worth = self.match_size(p) + self.match_size(q)
+                self.grid[p[0]][p[1]], self.grid[q[0]][q[1]] = tp, tq
+                if worth:
+                    yield p, q, worth
+
+    def hint(self):
+        """A pair of neighbours that makes a move, or None."""
+        return next(((p, q) for p, q, _ in self.moves()), None)
+
+    def best_move(self):
+        """Autoplay's move: one of the worthiest (a random one of them), or None."""
+        moves = list(self.moves())
+        if not moves:
+            return None
+        top = max(w for _, _, w in moves)
+        p, q, _ = self.rng.choice([m for m in moves if m[2] == top])
+        return p, q
+
+    def shuffle(self):
+        """Rearrange the heads (specials included) until there's a move and nothing matches already."""
+        tiles = [t for row in self.grid for t in row]
+        for _ in range(200):
+            self.rng.shuffle(tiles)
+            self.grid = [tiles[r * self.n:(r + 1) * self.n] for r in range(self.n)]
+            if not self.runs() and self.hint():
+                return
+        self.grid = self.fresh()
+
+
+# The game is drawn on a small canvas of "art pixels" and scaled up by a whole number with nearest-neighbour
+# filtering, so everything — gems, text, sparks and motion — snaps to chunky pixels.
+CELL = 20                 # art pixels per board cell
+# soul gems in their egg form: the same egg in a gold crown and cup, each in her colour (order of CHARACTERS)
+GEM_COLOURS = ["#ff6eb0", "#9a6bff", "#4f9dff", "#ffe94d", "#e3203a"]
+GEM_METAL = {"G": "#e9b949", "g": "#9b6a17", "Y": "#fff0a6"}   # gold, its shadow and its shine
+GEM_CROWN = [   # drawn over the top of the egg (from row 1, centred); "." leaves the egg showing
+    "....YY....",
+    "...gGGg...",
+    ".gGGYYGGg.",
+    "gGYGGGGYGg",
+    "g.G.gg.G.g",
+]
+GEM_CUP = [     # …and under it (down to row 18: a gap between gems above and below)
+    "g.G....G.g",
+    "gGGGYYGGGg",
+    ".gGGGGGGg.",
+    "..gGYYGg..",
+]
+CRUSH_FILE = os.path.expanduser("~/.config/magica-terminal/crush.json")   # best score
+KYUBEY_SPRITE = [          # the bomb: W white, R red, P pink (outlined like the gems)
+    "..................",
+    ".WW............WW.",
+    ".WWW..........WWW.",
+    "..WWWWWWWWWWWWWW..",
+    "..WWWWWWWWWWWWWW..",
+    ".WWWWWWWWWWWWWWWW.",
+    ".WWWWWWWWWWWWWWWW.",
+    ".WWWRRWWWWWWRRWWW.",
+    ".WWWRRWWWWWWRRWWW.",
+    ".WWWWWWWWWWWWWWWW.",
+    ".WWWWWWWPPWWWWWWW.",
+    "..WWWWWWWWWWWWWW..",
+    "..PWWWWWWWWWWWWP..",
+    ".PW.WWWWWWWWWW.WP.",
+    ".W...WWWWWWWW...W.",
+    ".W..............W.",
+    ".P..............P.",
+    "..................",
+]
+FONT_3X5 = {   # pixel font: 3x5 glyphs, rows top to bottom
+    "0": "111101101101111", "1": "010110010010111", "2": "111001111100111", "3": "111001111001111",
+    "4": "101101111001001", "5": "111100111001111", "6": "111100111101111", "7": "111001010010010",
+    "8": "111101111101111", "9": "111101111001111", "A": "010101111101101", "B": "110101110101110",
+    "C": "011100100100011", "D": "110101101101110", "E": "111100110100111", "F": "111100110100100",
+    "G": "011100101101011", "H": "101101111101101", "I": "111010010010111", "K": "101101110101101",
+    "L": "100100100100111", "M": "101111111101101", "N": "110101101101101", "O": "010101101101010",
+    "P": "110101110100100", "Q": "010101101110011", "R": "110101110101101", "S": "011100010001110",
+    "T": "111010010010010", "U": "101101101101111", "V": "101101101101010", "W": "101101111111101",
+    "X": "101101010101101", "Y": "101101010010010", "Z": "111001010100111", "!": "010010010000010", "+": "000010111010000",
+    "-": "000000111000000", ":": "000010000010000", " ": "000000000000000",
+}
+
+
+def hex_rgb(colour):
+    return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def pixels_to_surface(px):
+    """Rows of (r, g, b, a) → a cairo image surface (premultiplied ARGB)."""
+    h, w = len(px), len(px[0])
+    stride = cairo.ImageSurface.format_stride_for_width(cairo.FORMAT_ARGB32, w)
+    data = bytearray(stride * h)
+    for y, row in enumerate(px):
+        for x, (r, g, b, a) in enumerate(row):
+            i = y * stride + x * 4
+            data[i:i + 4] = bytes((b * a // 255, g * a // 255, r * a // 255, a))
+    return cairo.ImageSurface.create_for_data(data, cairo.FORMAT_ARGB32, w, h, stride)
+
+
+def outline(px, colour):
+    """A 1-pixel outline around the opaque pixels."""
+    h, w = len(px), len(px[0])
+    out = [list(row) for row in px]
+    for y in range(h):
+        for x in range(w):
+            if px[y][x][3] == 0 and any(0 <= y + dy < h and 0 <= x + dx < w and px[y + dy][x + dx][3]
+                                        for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0))):
+                out[y][x] = (*colour, 255)
+    return out
+
+
+def gem_pixels(kind, special):
+    """Her soul gem as a CELL x CELL sprite: an egg lit from the top-left (a facet, a glint, an outline) in its gold
+    crown and cup. Striped gems get light bands, wrapped ones are brighter; both are outlined in a light shade."""
+    c, white, black = hex_rgb(GEM_COLOURS[kind]), (255, 255, 255), (0, 0, 0)
+    shade = lambda a, b, t: tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+    tones = [shade(c, white, 0.6), shade(c, white, 0.25), c, shade(c, black, 0.3), shade(c, black, 0.5)]
+    px = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+    for y in range(CELL):
+        for x in range(CELL):
+            u, v = (x + 0.5 - CELL / 2) / 5.0, (y + 0.5 - 10) / 5.8
+            if (u / (1 - 0.15 * max(0.0, -v))) ** 2 + v * v <= 1:   # an egg, narrower at the top
+                light = 0.55 * u + 0.7 * v - 0.25 * (1 - (u * u + v * v))
+                tone = tones[sum(light >= t for t in (-0.55, -0.2, 0.2, 0.5))]
+                if special in ("h", "v") and ((y if special == "h" else x) // 2) % 2 == 0:
+                    tone = shade(tone, white, 0.55)
+                elif special in ("wrapped", "armed"):
+                    tone = shade(tone, white, 0.25)
+                px[y][x] = (*tone, 255)
+    for d in range(-1, 3):   # a facet: a lighter diagonal through the middle
+        p = px[10 - d][10 + d]
+        if p[3]:
+            px[10 - d][10 + d] = (*shade(p[:3], white, 0.35), 255)
+    for dx, dy in ((0, 0), (1, 0), (0, 1)):   # the glint
+        px[7 + dy][7 + dx] = (255, 255, 255, 255)
+    px = outline(px, shade(c, black, 0.72) if special is None else shade(c, white, 0.3))
+    for rows, top in ((GEM_CROWN, 1), (GEM_CUP, CELL - 1 - len(GEM_CUP))):
+        for i, row in enumerate(rows):
+            for j, ch in enumerate(row):
+                if ch in GEM_METAL:
+                    px[top + i][(CELL - len(row)) // 2 + j] = (*hex_rgb(GEM_METAL[ch]), 255)
+    return px
+
+
+def kyubey_pixels():
+    colours = {"W": (246, 246, 248), "R": (214, 33, 59), "P": (242, 140, 177)}
+    px = [[(0, 0, 0, 0)] * CELL for _ in range(CELL)]
+    for y, row in enumerate(KYUBEY_SPRITE):
+        for x, ch in enumerate(row):
+            if ch in colours:
+                px[y + 1][x + 1] = (*colours[ch], 255)
+    return px
+
+
+class Crush(Gtk.EventBox):
+    """The game, over a pane's terminal (see Pane.open_game). Each frame is drawn with cairo on the small canvas and
+    shown scaled up in an image (no cairo ↔ GTK draw signal, so python3-gi-cairo isn't needed)."""
+    MARGIN, TOP, BOTTOM = 4, 14, 12
+
+    def __init__(self, pane):
+        super().__init__(can_focus=True)
+        self.pane = pane
+        self.image = Gtk.Image(halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        self.add(self.image)
+        self.css = Gtk.CssProvider()   # opaque background: the terminal underneath is transparent
+        self.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        self._css_theme = None
+        self.board = CrushBoard(CRUSH_SIZE, len(CHARACTERS))
+        n = self.board.n
+        self.cw, self.ch = n * CELL + 2 * self.MARGIN, self.TOP + n * CELL + self.BOTTOM
+        self.canvas = cairo.ImageSurface(cairo.FORMAT_ARGB32, self.cw, self.ch)
+        self.sprites = {}          # tile id → sprite dict: kind, special, r, c (floats while moving), scale, alpha, flash
+        self.sync_sprites()
+        self.phases, self.phase = [], None
+        self.effects, self.particles, self.texts = [], [], []
+        self.score, self.best = 0, self.load_best()
+        self.autoplay, self.assisted = CRUSH_AUTOPLAY, False   # autoplay on / it has played this game (no best then)
+        self.selected, self.press, self.hint = None, None, None
+        self.shown_score = 0.0                      # the score counter rolls up to the real score
+        self.shake_amp, self.shake_t, self.shake_len = 0, 0.0, 1.0
+        self.freeze, self.fever = 0.0, 0.0          # hit-stop after a big blast / rainbow frame after a big chain
+        self.last_move = self.settled = self.now = time.monotonic()
+        self._sprite_cache, self._origin = {}, (0, 0, 1)
+        self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
+                        | Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.KEY_PRESS_MASK)
+        self.connect("button-press-event", self.on_press)
+        self.connect("button-release-event", lambda *_: setattr(self, "press", None))
+        self.connect("motion-notify-event", self.on_motion)
+        self.connect("key-press-event", self.on_key)
+        self.add_tick_callback(self.on_tick)
+
+    # ── state ──
+    def load_best(self):
+        try:
+            with open(CRUSH_FILE) as f:
+                return int(json.load(f).get("best", 0))
+        except (OSError, ValueError, AttributeError):
+            return 0
+
+    def save_best(self):
+        try:
+            os.makedirs(os.path.dirname(CRUSH_FILE), exist_ok=True)
+            with open(CRUSH_FILE, "w") as f:
+                json.dump({"best": self.best}, f)
+        except OSError:
+            pass
+
+    def sync_sprites(self):
+        """Sprites exactly as the board is (after a turn, in case an animation missed something)."""
+        old = self.sprites
+        self.sprites = {}
+        for r, c in self.board.cells():
+            t = self.board.at((r, c))
+            s = old.get(t.id) or dict(scale=1.0, alpha=1.0, flash=0.0)
+            s.update(kind=t.kind, special=t.special, r=float(r), c=float(c), dying=False)
+            self.sprites[t.id] = s
+
+    def colour(self, kind):
+        """Her soul gem's colour, for sparks, beams and text (Kyubey: white, or red on light)."""
+        if kind is None:
+            return "#f4f4f4" if self.pane.win.theme == "dark" else "#d6213b"
+        return GEM_COLOURS[kind]
+
+    def kick(self, amp, dur):
+        """Shake the board (the stronger shake wins)."""
+        if amp >= self.shake_amp * self.shake_t / self.shake_len:
+            self.shake_amp, self.shake_t, self.shake_len = amp, dur, dur
+
+    def sprite_surface(self, kind, special):
+        """Pre-drawn sprite for a soul gem (or Kyubey) and its special look."""
+        key = (kind, special)
+        if key not in self._sprite_cache:
+            px = outline(kyubey_pixels(), (40, 36, 48)) if kind is None else gem_pixels(kind, special)
+            self._sprite_cache[key] = pixels_to_surface(px)
+        return self._sprite_cache[key]
+
+    @property
+    def busy(self):
+        return self.phase is not None or bool(self.phases)
+
+    # ── input ──
+    def cell_at(self, x, y):
+        ox, oy, k = self._origin
+        cx, cy = (x - ox) / k - self.MARGIN, (y - oy) / k - self.TOP
+        r, c = int(cy // CELL), int(cx // CELL)
+        n = self.board.n
+        return (r, c) if 0 <= cx and 0 <= cy and r < n and c < n else None
+
+    def on_press(self, _, event):
+        self.grab_focus()
+        if event.button != 1 or self.busy:
+            return True
+        if self.autoplay:   # a click takes over
+            self.toggle_autoplay()
+        p = self.cell_at(event.x, event.y)
+        if p is None:
+            self.selected = None
+        elif self.selected and abs(p[0] - self.selected[0]) + abs(p[1] - self.selected[1]) == 1:
+            self.try_swap(self.selected, p)
+        else:
+            self.selected = None if self.selected == p else p
+            self.press = (p, event.x, event.y)
+        return True
+
+    def on_motion(self, _, event):
+        if not self.press or self.busy:
+            return False
+        p, x, y = self.press
+        k = self._origin[2]
+        dx, dy = (event.x - x) / k, (event.y - y) / k
+        if max(abs(dx), abs(dy)) >= CELL / 2:   # dragged half a cell: swap that way
+            q = (p[0] + (0 if abs(dx) > abs(dy) else (1 if dy > 0 else -1)),
+                 p[1] + ((1 if dx > 0 else -1) if abs(dx) > abs(dy) else 0))
+            self.press = None
+            if 0 <= q[0] < self.board.n and 0 <= q[1] < self.board.n:
+                self.try_swap(p, q)
+        return True
+
+    def on_key(self, _, event):
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_q, Gdk.KEY_Q):
+            self.pane.close_game()
+            return True
+        if event.keyval in (Gdk.KEY_a, Gdk.KEY_A):
+            self.toggle_autoplay()
+            return True
+        return False
+
+    def toggle_autoplay(self):
+        self.autoplay = not self.autoplay
+        self.settled = self.now
+        self.text("AUTOPLAY ON" if self.autoplay else "AUTOPLAY OFF", self.cw / 2, self.TOP + self.board.n * CELL / 2,
+                  "#ffffff", 2, 0.8)
+
+    # ── turns ──
+    def try_swap(self, a, b):
+        self.selected, self.press, self.hint = None, None, None
+        self.last_move = time.monotonic()
+        ta, tb = self.board.at(a), self.board.at(b)
+        steps = self.board.swap(a, b)
+        self.queue("swap", 0.16, ids=(ta.id, tb.id), a=a, b=b)
+        if steps is None:
+            self.queue("swap", 0.16, ids=(ta.id, tb.id), a=b, b=a)
+            return
+        for step in steps:
+            if step.transforms:
+                self.queue("transform", 0.35, step=step)
+            self.queue("pop", 0.3, step=step)
+            longest = max((to - fr for _, _, fr, to in step.falls), default=0)
+            self.queue("fall", 0.1 * math.sqrt(longest) + 0.12, step=step)
+        self.queue("settle", 0.0)
+
+    def queue(self, kind, dur, **data):
+        self.phases.append(dict(kind=kind, dur=dur / CRUSH_SPEED, **data))
+
+    def begin(self, ph):
+        ph["start"] = self.now
+        kind = ph["kind"]
+        if kind == "pop":
+            self.pop(ph["step"])
+        elif kind == "fall":
+            for t, c, fr, to in ph["step"].falls:
+                s = self.sprites.get(t.id)
+                if s is None:
+                    # as it was when it dropped in: it may turn special later in this turn
+                    s = self.sprites[t.id] = dict(kind=t.born_kind, special=None, scale=1.0, alpha=1.0, flash=0.0,
+                                                  dying=False)
+                s.update(r=float(fr), c=float(c), fr=fr, to=to)
+        elif kind == "settle":
+            self.settled = self.now
+            self.sync_sprites()
+            self.save_best()
+            if self.board.hint() is None:   # no moves left: shuffle
+                self.board.shuffle()
+                old = {i: (s["r"], s["c"]) for i, s in self.sprites.items()}
+                self.sync_sprites()
+                for i, s in self.sprites.items():
+                    s["from"], s["to"] = old.get(i, (s["r"], s["c"])), (s["r"], s["c"])
+                self.text("SHUFFLE!", self.cw / 2, self.TOP + self.board.n * CELL / 2, "#ffffff", 2, 1.0)
+                self.phases.insert(0, dict(kind="shuffle", dur=0.45 / CRUSH_SPEED))
+
+    def finish(self, ph):
+        kind = ph["kind"]
+        if kind == "swap":
+            ia, ib = ph["ids"]
+            self.sprites[ia].update(r=float(ph["b"][0]), c=float(ph["b"][1]))
+            self.sprites[ib].update(r=float(ph["a"][0]), c=float(ph["a"][1]))
+        elif kind == "transform":
+            for t, _, _ in ph["step"].transforms:
+                if t.id in self.sprites:
+                    self.sprites[t.id].update(special=t.special, flash=1.0)
+        elif kind == "pop":
+            step = ph["step"]
+            for t, _, _ in step.clears:
+                self.sprites.pop(t.id, None)
+            for t, r, c in step.created:
+                if t.id in self.sprites:
+                    self.sprites[t.id].update(kind=t.kind, special=t.special, flash=1.0)
+        elif kind == "fall":
+            for t, c, fr, to in ph["step"].falls:
+                if t.id in self.sprites:
+                    self.sprites[t.id].update(r=float(to), c=float(c))
+        elif kind == "shuffle":
+            for s in self.sprites.values():
+                s["r"], s["c"] = s.pop("to")
+                s.pop("from")
+
+    def update(self, ph, p):
+        kind = ph["kind"]
+        if kind == "swap":
+            e = p * p * (3 - 2 * p)
+            (ar, ac), (br, bc) = ph["a"], ph["b"]
+            ia, ib = ph["ids"]
+            self.sprites[ia].update(r=ar + (br - ar) * e, c=ac + (bc - ac) * e)
+            self.sprites[ib].update(r=br + (ar - br) * e, c=bc + (ac - bc) * e)
+        elif kind == "transform":
+            for t, _, _ in ph["step"].transforms:
+                if t.id in self.sprites:
+                    self.sprites[t.id]["flash"] = 1.0 if int(p * 6) % 2 == 0 else 0.0
+        elif kind == "pop":
+            for t, _, _ in ph["step"].clears:
+                s = self.sprites.get(t.id)
+                if s:
+                    s.update(dying=True, scale=1 + 0.45 * p, alpha=1 - p)
+        elif kind == "fall":
+            dur = ph["dur"]
+            for t, c, fr, to in ph["step"].falls:
+                s = self.sprites.get(t.id)
+                if not s:
+                    continue
+                own = (0.1 * math.sqrt(to - fr) + 0.02) / CRUSH_SPEED   # falls as if by gravity
+                tt = p * dur
+                if tt < own:
+                    s["r"] = fr + (to - fr) * (tt / own) ** 2
+                else:   # a small bounce on landing
+                    b = min(1.0, (tt - own) / max(dur - own, 0.01))
+                    s["r"] = to - 0.12 * math.sin(math.pi * b) * (1 - b)
+        elif kind == "shuffle":
+            e = p * p * (3 - 2 * p)
+            for s in self.sprites.values():
+                (fr, fc), (tr, tc) = s["from"], s["to"]
+                s["r"], s["c"] = fr + (tr - fr) * e, fc + (tc - fc) * e
+
+    def pop(self, step):
+        """Start of a clear: score, effects for every special that goes off, sparks for every gem — and the bigger the
+        moment (a long chain, a big clear, a bomb), the harder it shakes and the more it sparkles."""
+        self.score += step.score
+        if not self.assisted:
+            self.best = max(self.best, self.score)
+        x0, y0, n = self.MARGIN, self.TOP, self.board.n
+        centre = lambda r, c: (x0 + c * CELL + CELL / 2, y0 + r * CELL + CELL / 2)
+        big = any(f[0] in ("bomb", "board", "blast", "cross") for f in step.fires)
+        power = step.combo - 1 + len(step.clears) // 10 + 2 * big
+        for special, r, c, kind in step.fires:
+            colour = self.colour(kind)
+            if special == "wrapped":   # stays on the board, armed for a second blast
+                for s in self.sprites.values():
+                    if not s["dying"] and round(s["r"]) == r and round(s["c"]) == c:
+                        s["special"] = "armed"
+            if special == "bomb":
+                targets = [centre(rr, cc) for t, rr, cc in step.clears if t.kind == kind]
+                self.effects.append(dict(kind="rays", at=centre(r, c), targets=targets, colour=colour, t=0, life=0.4))
+            elif special == "board":
+                self.effects.append(dict(kind="flash", colour="#ffffff", t=0, life=0.5))
+            else:
+                self.effects.append(dict(kind=special, at=(r, c), colour=colour, t=0, life=0.35))
+            self.kick(3 if big else 1, 0.3)
+        sparks = 3 + min(power, 6)
+        for t, r, c in step.clears:
+            x, y = centre(r, c)
+            for _ in range(sparks):
+                a, v = random.uniform(0, 2 * math.pi), random.uniform(25, 60 + 10 * min(power, 6))
+                self.particles.append(dict(x=x, y=y, vx=math.cos(a) * v, vy=math.sin(a) * v - 30, t=0, shape="spark",
+                                           life=random.uniform(0.35, 0.6), colour=self.colour(t.kind)))
+        if step.clears:
+            kinds = [t.kind for t, _, _ in step.clears if t.kind is not None]
+            kind = max(set(kinds), key=kinds.count) if kinds else None
+            xs = [centre(r, c) for _, r, c in step.clears]
+            x, y = sum(p[0] for p in xs) / len(xs), sum(p[1] for p in xs) / len(xs)
+            self.text(f"+{step.score}", x, y, self.colour(kind), 1, 0.8, rise=10)
+            if power >= 2:   # a shockwave from the middle of the clear
+                self.effects.append(dict(kind="ring", at=(x, y), reach=24 + 8 * min(power, 8), colour=self.colour(kind),
+                                         t=0, life=0.45))
+        if power >= 1:
+            self.kick(min(5, 1 + power // 2), 0.15 + 0.05 * min(power, 8))
+        if power >= 4:
+            self.freeze = 0.08   # hit-stop: everything holds for a beat
+        combo, mid = step.combo, self.TOP + n * CELL / 2
+        colour = self.colour(combo % len(CHARACTERS))
+        if combo == 2:
+            self.text("COMBO X2!", self.cw / 2, mid - 10, colour, 2, 0.9, rise=6, blink=True)
+        elif combo >= 3:
+            word = {3: "GREAT!", 4: "AMAZING!", 5: "MIRACLE!"}.get(combo, "TIRO FINALE!")
+            self.text(word, self.cw / 2, mid - 14, colour, 2, 1.1, rise=6, blink=True)
+            self.text(f"COMBO X{combo}", self.cw / 2, mid + 2, "#ffffff", 1, 1.1, rise=6)
+            self.effects.append(dict(kind="flash", colour=colour, t=0, life=0.35, strength=0.35))
+        if combo >= 4:
+            self.fever = 1.8
+        if combo >= 5:   # confetti from both bottom corners
+            for side in (0, 1):
+                for _ in range(24):
+                    a = math.radians(random.uniform(55, 85))
+                    v = random.uniform(110, 170)
+                    self.particles.append(dict(
+                        x=x0 if side == 0 else x0 + n * CELL, y=y0 + n * CELL, vx=(1 if side == 0 else -1) * math.cos(a) * v,
+                        vy=-math.sin(a) * v, t=0, life=random.uniform(1.0, 1.5), shape="confetti",
+                        colour=GEM_COLOURS[random.randrange(len(GEM_COLOURS))]))
+
+    def text(self, s, x, y, colour, size, life, rise=0, blink=False):
+        self.texts.append(dict(s=s, x=x, y=y, colour=colour, size=size, t=0, life=life, rise=rise, blink=blink))
+
+    def on_tick(self, *_):
+        now = time.monotonic()
+        dt, self.now = min(now - self.now, 0.05), now
+        if self.freeze > 0:   # hit-stop: the turn holds still (sparks keep flying)
+            self.freeze -= dt
+            if self.phase:
+                self.phase["start"] += dt
+        while self.freeze <= 0:
+            if self.phase is None:
+                if not self.phases:
+                    break
+                self.phase = self.phases.pop(0)
+                self.begin(self.phase)
+            p = (now - self.phase["start"]) / self.phase["dur"] if self.phase["dur"] > 0 else 1.0
+            self.update(self.phase, min(p, 1.0))
+            if p < 1.0:
+                break
+            self.finish(self.phase)
+            self.phase = None
+        for s in self.sprites.values():
+            s["flash"] = max(0.0, s["flash"] - dt * 3)
+        for e in self.effects + self.texts:
+            e["t"] += dt
+        for q in self.particles:
+            q["t"] += dt
+            q["x"] += q["vx"] * dt
+            q["y"] += q["vy"] * dt
+            q["vy"] += (90 if q["shape"] == "confetti" else 160 if q["shape"] == "spark" else 0) * dt
+            if q["shape"] == "confetti":
+                q["vx"] *= 1 - 1.5 * dt   # air drag, so it flutters down
+        if self.fever > 0:   # fever: stars twinkle all over the board
+            self.fever -= dt
+            if random.random() < 0.5:
+                n = self.board.n
+                self.particles.append(dict(x=self.MARGIN + random.uniform(0, n * CELL), y=self.TOP + random.uniform(0, n * CELL),
+                                           vx=0, vy=0, t=0, life=0.5, shape="star", colour="#ffffff"))
+        self.shown_score += (self.score - self.shown_score) * min(1.0, dt * 8)
+        if self.score - self.shown_score < 1:
+            self.shown_score = self.score
+        self.effects = [e for e in self.effects if e["t"] < e["life"]]
+        self.texts = [e for e in self.texts if e["t"] < e["life"]]
+        self.particles = [q for q in self.particles if q["t"] < q["life"]]
+        self.shake_t = max(0.0, self.shake_t - dt)
+        if self.autoplay and not self.busy and now - self.settled > CRUSH_AUTOPLAY_DELAY:
+            move = self.board.best_move()
+            if move:
+                self.assisted = True
+                self.try_swap(*move)
+        if not self.busy and self.hint is None and now - self.last_move > CRUSH_HINT_AFTER:
+            self.hint = self.board.hint()
+        self.render()
+        return True
+
+    # ── drawing ──
+    def render(self):
+        theme = THEMES[self.pane.win.theme]
+        if self._css_theme != self.pane.win.theme:
+            self._css_theme = self.pane.win.theme
+            self.css.load_from_data(f"* {{ background: {theme['bg']}; }}".encode())
+        w, h = self.get_allocated_width(), self.get_allocated_height()
+        if w <= 1 or h <= 1:
+            return
+        k = min(w / self.cw, h / self.ch)
+        k = math.floor(k) if k >= 1 else k   # whole-number scale keeps the pixels square
+        self._origin = ((w - self.cw * k) / 2, (h - self.ch * k) / 2, k)
+        self.draw_canvas(cairo.Context(self.canvas), theme)
+        self.canvas.flush()
+        data, stride = self.canvas.get_data(), self.canvas.get_stride()
+        rgba = bytearray(len(data))   # cairo's BGRA (opaque, so not premultiplied) → RGBA
+        rgba[0::4], rgba[1::4], rgba[2::4], rgba[3::4] = data[2::4], data[1::4], data[0::4], data[3::4]
+        pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(rgba)), GdkPixbuf.Colorspace.RGB, True, 8,
+                                             self.cw, self.ch, stride)
+        self.image.set_from_pixbuf(pb.scale_simple(max(1, round(self.cw * k)), max(1, round(self.ch * k)),
+                                                   GdkPixbuf.InterpType.NEAREST))
+
+    def fill(self, cr, colour, x, y, w, h, alpha=1.0):
+        r, g, b = hex_rgb(colour)
+        cr.set_source_rgba(r / 255, g / 255, b / 255, alpha)
+        cr.rectangle(round(x), round(y), round(w), round(h))
+        cr.fill()
+
+    def draw_text(self, cr, s, x, y, colour, size=1, centred=False, alpha=1.0, outline=None):
+        width = len(s) * 4 * size - size
+        if centred:
+            x -= width / 2
+        x, y = round(x), round(y)
+        if outline:   # 1-pixel outline all round, so it reads over the heads
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 2)):
+                self.draw_text(cr, s, x + dx * size, y + dy * size, outline, size, alpha=alpha)
+        for i, ch in enumerate(s.upper()):
+            glyph = FONT_3X5.get(ch, FONT_3X5[" "])
+            for j, bit in enumerate(glyph):
+                if bit == "1":
+                    self.fill(cr, colour, x + (i * 4 + j % 3) * size, y + (j // 3) * size, size, size, alpha)
+
+    def draw_canvas(self, cr, theme):
+        cr.set_antialias(cairo.ANTIALIAS_NONE)
+        bg, fg, dim = theme["bg"], theme["fg"], theme["dim"]
+        self.fill(cr, bg, 0, 0, self.cw, self.ch)
+        n, x0, y0 = self.board.n, self.MARGIN, self.TOP
+        amp = round(self.shake_amp * self.shake_t / self.shake_len)
+        shake = (random.randint(-amp, amp), random.randint(-amp, amp)) if amp else (0, 0)
+
+        # header: score and best
+        self.draw_text(cr, "SCORE", x0, 3, dim)
+        rolling = self.shown_score < self.score
+        self.draw_text(cr, str(int(self.shown_score)), x0 + 24, 3,
+                       self.colour(int(self.now * 12) % len(CHARACTERS)) if rolling else fg)
+        best = f"BEST {self.best}"
+        self.draw_text(cr, best, x0 + n * CELL - len(best) * 4 + 1, 3, dim)
+
+        cr.save()
+        cr.translate(*shake)
+        # board: a pixel frame and a checkerboard
+        self.fill(cr, dim, x0 - 2, y0 - 2, n * CELL + 4, n * CELL + 4)
+        if self.fever > 0:   # fever: the frame runs through the five colours
+            side, step = n * CELL + 4, 6
+            for i in range(0, 4 * side, step):
+                colour = GEM_COLOURS[(i // step + int(self.now * 20)) % len(GEM_COLOURS)]
+                d = i % side
+                x, y, w, h = [(x0 - 2 + d, y0 - 2, step, 2), (x0 + n * CELL, y0 - 2 + d, 2, step),
+                              (x0 + n * CELL + 2 - d - step, y0 + n * CELL, step, 2), (x0 - 2, y0 + n * CELL + 2 - d - step, 2, step)][i // side]
+                self.fill(cr, colour, x, y, w, h)
+        self.fill(cr, bg, x0 - 1, y0 - 1, n * CELL + 2, n * CELL + 2)
+        light, dark = mix(bg, fg, 0.05), mix(bg, fg, 0.10)
+        for r in range(n):
+            for c in range(n):
+                self.fill(cr, light if (r + c) % 2 == 0 else dark, x0 + c * CELL, y0 + r * CELL, CELL, CELL)
+        hint = set(self.hint or ())
+        cr.save()
+        cr.rectangle(x0, y0, n * CELL, n * CELL)   # heads dropping in from above appear at the top edge
+        cr.clip()
+        for s in sorted(self.sprites.values(), key=lambda s: s["dying"]):
+            x, y = x0 + s["c"] * CELL, y0 + s["r"] * CELL
+            p = (round(s["r"]), round(s["c"]))
+            if p == self.selected and not self.busy:
+                y -= 1 + round(math.sin(self.now * 8))   # selected: bobs
+            if p in hint and not self.busy:
+                x += round(math.sin(self.now * 18)) if int(self.now * 2) % 2 == 0 else 0   # hint: wiggles
+            self.draw_sprite(cr, s, x, y)
+        cr.restore()
+        if self.selected and not self.busy:   # corner brackets in her colour
+            r, c = self.selected
+            colour = self.colour(self.board.at(self.selected).kind)
+            bx, by = x0 + c * CELL, y0 + r * CELL
+            for dx, dy in ((0, 0), (CELL - 3, 0), (0, CELL - 3), (CELL - 3, CELL - 3)):
+                self.fill(cr, colour, bx + dx, by + dy + (0 if dy == 0 else 2), 3, 1)
+                self.fill(cr, colour, bx + dx + (0 if dx == 0 else 2), by + dy, 1, 3)
+        self.draw_effects(cr)
+        cr.restore()
+
+        for q in self.particles:
+            a = 1 - q["t"] / q["life"]
+            if q["shape"] == "star":   # a little plus that grows and shrinks
+                size = 1 if abs(q["t"] / q["life"] - 0.5) > 0.25 else 2
+                self.fill(cr, q["colour"], q["x"] - size, q["y"], 2 * size + 1, 1)
+                self.fill(cr, q["colour"], q["x"], q["y"] - size, 1, 2 * size + 1)
+            elif q["shape"] == "confetti":   # tumbles: wide, then tall
+                w, h = (2, 1) if int(q["t"] * 10 + q["vx"]) % 2 else (1, 2)
+                self.fill(cr, q["colour"], q["x"], q["y"], w, h, min(1.0, 3 * a))
+            else:
+                self.fill(cr, q["colour"], q["x"], q["y"], 2, 2, a)
+        for e in self.texts:
+            f = e["t"] / e["life"]
+            if e["blink"] and int(e["t"] * 10) % 2:
+                continue
+            self.draw_text(cr, e["s"], e["x"], e["y"] - e["rise"] * f, e["colour"], e["size"], centred=True,
+                           alpha=1 - max(0, f - 0.6) / 0.4, outline="#120f18")
+
+        # footer: title in the five colours, and how to leave
+        title = "MAGICA CRUSH"
+        tx = x0
+        for i, ch in enumerate(title):
+            colour = self.colour((i + int(self.now * 3)) % len(CHARACTERS)) if ch != " " else dim
+            self.draw_text(cr, ch, tx + i * 4, self.ch - 7, colour)
+        self.draw_text(cr, "ESC QUIT", x0 + n * CELL - 31, self.ch - 7, dim)
+        self.draw_text(cr, "AUTO" if self.autoplay else "A AUTO", x0 + n * CELL // 2 + 8, self.ch - 7,
+                       fg if self.autoplay else dim, centred=True)
+
+    def draw_sprite(self, cr, s, x, y):
+        surf = self.sprite_surface(s["kind"], s["special"])
+        cr.save()
+        cr.translate(round(x + CELL / 2), round(y + CELL / 2))
+        if s["scale"] != 1:
+            cr.scale(s["scale"], s["scale"])
+        cr.set_source_surface(surf, -CELL / 2, -CELL / 2)
+        cr.get_source().set_filter(cairo.FILTER_NEAREST)
+        cr.paint_with_alpha(s["alpha"])
+        flash = s["flash"]
+        if s["special"] == "armed":   # about to go off again: flickers
+            flash = max(flash, 0.6 if int(self.now * 12) % 2 == 0 else 0.0)
+        if flash > 0:   # flash: her silhouette in white
+            cr.set_source_rgba(1, 1, 1, 0.8 * flash * s["alpha"])
+            cr.mask_surface(surf, -CELL / 2, -CELL / 2)
+        cr.restore()
+        if s["special"] in ("wrapped", "armed") and not s["dying"]:   # wrapper: little corner pips
+            colour = self.colour(s["kind"])
+            for dx, dy in ((0, 0), (CELL - 2, 0), (0, CELL - 2), (CELL - 2, CELL - 2)):
+                self.fill(cr, colour, x + dx, y + dy, 2, 2)
+
+    def draw_effects(self, cr):
+        x0, y0, n = self.MARGIN, self.TOP, self.board.n
+        for e in self.effects:
+            f = e["t"] / e["life"]
+            a = 1 - f
+            kind = e["kind"]
+            if kind == "flash":
+                self.fill(cr, e["colour"], x0, y0, n * CELL, n * CELL, e.get("strength", 0.8) * a)
+                continue
+            if kind == "ring":   # a pixel circle growing out of the clear
+                (cx, cy), rad = e["at"], e["reach"] * (0.2 + 0.8 * f)
+                for i in range(max(12, int(rad * 2.5))):
+                    ang = 2 * math.pi * i / max(12, int(rad * 2.5))
+                    self.fill(cr, e["colour"], cx + math.cos(ang) * rad, cy + math.sin(ang) * rad, 2, 2, a)
+                continue
+            if kind == "rays":
+                ax, ay = e["at"]
+                r, g, b = hex_rgb(e["colour"])
+                cr.set_line_width(1)
+                for tx, ty in e["targets"]:
+                    cr.set_source_rgba(r / 255, g / 255, b / 255, a)
+                    cr.move_to(round(ax) + 0.5, round(ay) + 0.5)
+                    cr.line_to(round(ax + (tx - ax) * min(1, f * 3)) + 0.5, round(ay + (ty - ay) * min(1, f * 3)) + 0.5)
+                    cr.stroke()
+                continue
+            r, c = e["at"]
+            cx, cy = x0 + c * CELL + CELL / 2, y0 + r * CELL + CELL / 2
+            thick = max(1, round(8 * a))
+            if kind in ("h", "cross"):
+                rows = (r - 1, r, r + 1) if kind == "cross" else (r,)
+                for rr in rows:
+                    self.fill(cr, "#ffffff", x0, y0 + rr * CELL + CELL / 2 - thick / 2, n * CELL, thick, a)
+                    self.fill(cr, e["colour"], x0, y0 + rr * CELL + CELL / 2 - thick / 4, n * CELL, max(1, thick / 2), a)
+            if kind in ("v", "cross"):
+                cols = (c - 1, c, c + 1) if kind == "cross" else (c,)
+                for cc in cols:
+                    self.fill(cr, "#ffffff", x0 + cc * CELL + CELL / 2 - thick / 2, y0, thick, n * CELL, a)
+                    self.fill(cr, e["colour"], x0 + cc * CELL + CELL / 2 - thick / 4, y0, max(1, thick / 2), n * CELL, a)
+            if kind in ("wrapped", "armed", "blast"):   # a square ring growing out of her cell
+                reach = (1.5 if kind != "blast" else 2.5) * CELL * (0.3 + 0.7 * f)
+                for colour, inset in (("#ffffff", 0), (e["colour"], 2)):
+                    rr = reach - inset
+                    for x, y, ww, hh in ((cx - rr, cy - rr, 2 * rr, 2), (cx - rr, cy + rr - 2, 2 * rr, 2),
+                                         (cx - rr, cy - rr, 2, 2 * rr), (cx + rr - 2, cy - rr, 2, 2 * rr)):
+                        self.fill(cr, colour, x, y, ww, hh, a)
+
+
 class Pane(Gtk.Overlay):
     """One terminal over a backdrop with its character's figure."""
 
     def __init__(self, app_window, cwd=None, command=None, character=None):
         super().__init__()
         self.win = app_window
+        self.game = None          # the `crush` game while it's open over this pane
         t = THEMES[app_window.theme]
         self.theme = t
         self.focused = False
@@ -405,6 +1421,28 @@ class Pane(Gtk.Overlay):
         self.colour = self.character[2] if self.win.theme == "dark" else self.character[3]
         self.set_focused(self.focused)
 
+    def open_game(self):
+        """`crush`: the game covers the terminal (the shell waits underneath) until Esc / q."""
+        if self.game:
+            return
+        self.game = Crush(self)
+        self.add_overlay(self.game)
+        self.reorder_overlay(self.game, 1)   # just above the terminal, under the frame and search bar
+        self.game.connect("focus-in-event", lambda *_: self.set_focused(True))
+        self.game.connect("focus-out-event", lambda *_: self.set_focused(False))
+        self.game.show_all()
+        self.game.grab_focus()
+        self.update_figure()
+
+    def close_game(self):
+        if not self.game:
+            return
+        self.game.save_best()
+        self.game.destroy()
+        self.game = None
+        self.update_figure()
+        self.term.grab_focus()
+
     def on_click(self, term, event):
         if event.button != 1 or not event.state & Gdk.ModifierType.CONTROL_MASK:
             return False
@@ -430,7 +1468,7 @@ class Pane(Gtk.Overlay):
         self.last_activity = time.monotonic()
 
     def idle_tick(self):
-        if (time.monotonic() - self.last_activity >= IDLE_AFTER and self.get_mapped() and not self.hovering
+        if (time.monotonic() - self.last_activity >= IDLE_AFTER and self.get_mapped() and not self.hovering and not self.game
                 and not getattr(self, "_hopping", False) and not getattr(self, "_breathing", False)):
             self.hop(IDLE_BOB, 2) if random.random() < 0.5 else self.breathe()
         self._idle_id = GLib.timeout_add(int(random.uniform(*IDLE_EVERY) * 1000), self.idle_tick)
@@ -452,6 +1490,9 @@ class Pane(Gtk.Overlay):
     def on_title(self, *_):
         # typing a character's name in the shell sends the title "magica:set:<name>" (see ~/.bashrc)
         title = self.term.get_window_title() or ""
+        if title == "magica:crush":   # `crush` (see ~/.bashrc): the game, in this pane
+            GLib.idle_add(lambda: self.open_game() and False)
+            return
         if title.startswith("magica:layout:"):   # `pair` / `magica` (see ~/.bashrc); the shell already became Madoka
             name = title[len("magica:layout:"):].strip()
             if name in LAYOUTS:
@@ -656,6 +1697,10 @@ class Pane(Gtk.Overlay):
     def update_figure(self):
         w, h = self.get_allocated_width(), self.get_allocated_height()
         if w <= 1 or h <= 1:
+            return False
+        self.img.set_visible(self.game is None)   # no figure or bar while the game is open
+        if self.game:
+            self.base.set_visible(False)
             return False
         s = max(w / 1920, h / 1080)
         fh = max(1, round(FIG_HEIGHT * s))
@@ -1029,9 +2074,15 @@ class App(Gtk.Application):
     def do_activate(self):
         # `magica-terminal CMD ARGS…` or `magica-terminal -e CMD ARGS…` runs CMD in the first pane (xdg-terminal-exec)
         args = sys.argv[1:]
+        crush = args[:1] == ["--crush"]   # open the game in the first pane (for trying it out)
+        if crush:
+            args = args[1:]
         if args[:1] in (["-e"], ["--"]):
             args = args[1:]
-        Window(self, command=args or None).show_all()
+        win = Window(self, command=args or None)
+        win.show_all()
+        if crush:
+            GLib.idle_add(lambda: win.panes_in(win.current_holder())[0].open_game() and False)
 
 
 def set_process_name(name):
@@ -1046,5 +2097,13 @@ def set_process_name(name):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--crush"] and os.environ.get("MAGICA_CHAR"):
+        # run from inside a Magica Terminal pane: open the game in that pane (like `crush`), not in a new window
+        try:
+            with open("/dev/tty", "w") as tty:
+                tty.write("\033]0;magica:crush\007")
+            sys.exit(0)
+        except OSError:
+            pass
     set_process_name("magica-terminal")
     App().run(None)

@@ -33,6 +33,17 @@ In the shell:
 - `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character.
 - `kyubey` opens a root shell as Kyubey; `exit` brings her back.
 - `pair` lays out Madoka | Homura; `magica` all five (Madoka, Homura above; Sayaka, Mami, Kyoko below).
+- `crush` opens Magica Crush in that pane (Linux only): a pixel-art match-3 game with the five soul gems. Esc or q
+  goes back to the prompt.
+
+Magica Crush: swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a
+striped gem (clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a
+Kyubey bomb (swap it with a gem to clear every gem of that colour). Swapping two specials together combines them, and
+chains score more each step. Gems dropping in during a chain are a bit lucky (some copy a neighbour, a few
+arrive striped), less so each step, so long chains of special clears happen but don't go on forever. It's endless, with
+the best score kept in `~/.config/magica-terminal/crush.json`. Press A to let it play itself (A again, or a click, takes back
+over); `"crush_autoplay": true` in the settings starts every game that way. A game autoplay has touched doesn't set a best
+score.
 
 She reacts to what you run: a small jump when a command succeeds, a red squash when it fails, three hops (plus a
 notification if the window isn't focused) when a long command finishes in a pane you weren't looking at, and an

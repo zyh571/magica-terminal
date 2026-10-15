@@ -28,6 +28,8 @@ if [ -n "$MAGICA_CHAR" ]; then
     eval "$_magica_l() { MAGICA_CHAR=madoka; _magica_prompt; printf '\033]0;magica:layout:%s\007' $_magica_l; sleep 0.1; clear; }"
   done
   unset _magica_l
+  # `crush`: a match-3 game with the soul gems, in this pane (Esc / q comes back to the prompt)
+  crush() { printf '\033]0;magica:crush\007'; sleep 0.1; }   # (the sleep lets the terminal see the title before the prompt resets it)
   # `kyubey`: this pane becomes Kyubey and runs a root shell in place; `exit` brings her back
   kyubey() {
     sudo -v || return            # ask for the password first; no switch (and no clear) if it fails
