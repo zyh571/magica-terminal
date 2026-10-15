@@ -21,6 +21,7 @@ Everything is linked back to this folder, so edits here show up in new windows. 
 | Ctrl+Shift+W | close pane |
 | Ctrl+Alt+Arrows | move between panes |
 | Ctrl+Shift+T, Ctrl+PageUp/Down | new tab, switch tabs |
+| Ctrl+1…8 / Ctrl+9 | go to tab N / last tab |
 | Ctrl+Shift+C / V | copy / paste |
 | Ctrl+Shift+Plus / Minus / 0 | font size |
 | Ctrl+Shift+L | light / dark |
@@ -36,6 +37,20 @@ In the shell:
 She reacts to what you run: a small jump when a command succeeds, a red squash when it fails, three hops (plus a
 notification if the window isn't focused) when a long command finishes in a pane you weren't looking at, and an
 occasional bob or breath while idle.
+
+Programs that ask the terminal for its background colour or light/dark mode get the current theme's answer, and are
+told when Ctrl+Shift+L switches it. In Claude Code, pick **Auto (match terminal)** in `/theme`. Its fixed `dark` theme draws
+pale text that is hard to read on the light background.
+
+Most settings (figure size, hop heights, idle timing, failure flash, font, …) can be changed in
+`~/.config/magica-terminal/settings.json` (`%APPDATA%\magica-terminal\settings.json` on Windows), using the lower-case names of
+the constants at the top of `magica-terminal` (or `windows/renderer.js`):
+
+```json
+{ "idle_bob": 16, "idle_every": [4, 8], "notify": false }
+```
+
+Changes apply to new windows. Unknown names and bad values are ignored with a warning.
 
 Closing the window saves tabs, splits, characters and folders to `~/.config/magica-terminal/session.json`; the
 next launch restores them.

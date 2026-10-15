@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('magica', {
+  settings: ipcRenderer.sendSync('settings'),
   init: () => ipcRenderer.invoke('init'),
   spawn: opts => ipcRenderer.invoke('pty:spawn', opts),
   write: (id, data) => ipcRenderer.send('pty:write', id, data),

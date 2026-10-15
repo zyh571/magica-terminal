@@ -2,31 +2,45 @@
 // every pane is an xterm.js terminal with a transparent background, her figure in the bottom-right corner in front
 // of the text, and the prompt, cursor and selection in her colour. Shells report commands with OSC 666, as
 // vte.shell.preexec / vte.shell.postexec=<status> (shell/magica.ps1), and their folder with OSC 9;9.
-// Keys, behaviour and settings match the Linux version; settings are the constants below.
+// Keys, behaviour and settings match the Linux version; settings are the constants below, and the ones wrapped in
+// setting() can be overridden by their lower-case names in %APPDATA%\magica-terminal\settings.json, e.g.
+// {"idle_bob": 16, "font_size": 16, "idle_every": [4, 8], "notify": false}
 'use strict';
 
-const FONT_FAMILY = '"Cascadia Mono", Consolas, "Courier New", monospace';
-const FONT_SIZE = 15;     // px
+const usedSettings = new Set();
+function setting(name, value) {
+  const key = name.toLowerCase(), v = magica.settings[key];
+  usedSettings.add(key);
+  if (v === undefined) return value;
+  const ok = value instanceof Set ? Array.isArray(v) && v.every(Number.isInteger)
+    : Array.isArray(value) ? Array.isArray(v) && v.length === value.length && v.every(x => typeof x === 'number')
+    : typeof v === typeof value;
+  if (!ok) { console.warn(`settings.json: bad value for "${key}":`, v); return value; }
+  return value instanceof Set ? new Set(v) : v;
+}
+
+const FONT_FAMILY = setting('FONT_FAMILY', '"Cascadia Mono", Consolas, "Courier New", monospace');
+const FONT_SIZE = setting('FONT_SIZE', 15);     // px
 const PADDING = 10;       // px around the text (style.css .term-host)
 
 // Figure size, as at full screen (1920x1080): a pane keeps the full-screen size while either its width or height is
 // still full, and shrinks once both shrink.
-const FIG_HEIGHT = 240, FIG_RIGHT = 30, FIG_BOTTOM = 12;
-const BASE_HEIGHT = 5, BASE_GAP = 4;   // coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
-const HOVER_OPACITY = 0.25;   // figure opacity while the mouse is over it
-const FAIL_FLASH = 0.5;       // s the figure and the bar under it stay tinted red after a command fails (0 = off)
-const FAIL_TINT = 0.5;        // how much red is mixed into them
-const FAIL_SQUASH = 0.15;     // …and she gets squashed: this much shorter (and a bit wider) for a moment (0 = off)
-const FAIL_RED = '#ff1f1f';
+const FIG_HEIGHT = setting('FIG_HEIGHT', 240), FIG_RIGHT = setting('FIG_RIGHT', 30), FIG_BOTTOM = setting('FIG_BOTTOM', 12);
+const BASE_HEIGHT = setting('BASE_HEIGHT', 5), BASE_GAP = setting('BASE_GAP', 4);   // coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
+const HOVER_OPACITY = setting('HOVER_OPACITY', 0.25);   // figure opacity while the mouse is over it
+const FAIL_FLASH = setting('FAIL_FLASH', 0.5);       // s the figure and the bar under it stay tinted red after a command fails (0 = off)
+const FAIL_TINT = setting('FAIL_TINT', 0.5);        // how much red is mixed into them
+const FAIL_SQUASH = setting('FAIL_SQUASH', 0.15);     // …and she gets squashed: this much shorter (and a bit wider) for a moment (0 = off)
+const FAIL_RED = setting('FAIL_RED', '#ff1f1f');
 // exit statuses that don't count as failures: 130 (Ctrl+C in bash) and STATUS_CONTROL_C_EXIT (Ctrl+C on Windows)
-const IGNORED_EXIT = new Set([130, -1073741510, 3221225786]);
-const LONG_COMMAND = 10;      // s: a command running at least this long in a pane you're not looking at → she hops (0 = off)
-const HOP_HEIGHT = 22, HOPS = 3;
-const JUMP_HEIGHT = 20;       // every successful command: one small jump of this height (0 = off)
-const NOTIFY = true;          // …and a notification when the window isn't active
-const IDLE_AFTER = 15;        // s without output or typing before she starts idling (0 = off)
-const IDLE_EVERY = [6, 14];   // s between idle moves (random in this range)
-const IDLE_BOB = 6, IDLE_BREATH = 0.04;
+const IGNORED_EXIT = setting('IGNORED_EXIT', new Set([130, -1073741510, 3221225786]));
+const LONG_COMMAND = setting('LONG_COMMAND', 10);      // s: a command running at least this long in a pane you're not looking at → she hops (0 = off)
+const HOP_HEIGHT = setting('HOP_HEIGHT', 22), HOPS = setting('HOPS', 3);
+const JUMP_HEIGHT = setting('JUMP_HEIGHT', 20);       // every successful command: one small jump of this height (0 = off)
+const NOTIFY = setting('NOTIFY', true);          // …and a notification when the window isn't active
+const IDLE_AFTER = setting('IDLE_AFTER', 15);        // s without output or typing before she starts idling (0 = off)
+const IDLE_EVERY = setting('IDLE_EVERY', [6, 14]);   // s between idle moves (random in this range)
+const IDLE_BOB = setting('IDLE_BOB', 12), IDLE_BREATH = setting('IDLE_BREATH', 0.04);
 
 // hot commands typed in the shell: equal splits, "h" = side by side, "v" = stacked
 const LAYOUTS = {
@@ -35,11 +49,11 @@ const LAYOUTS = {
 };
 // Ctrl+click opens file paths (if they exist) as well as URLs and programs' own OSC 8 hyperlinks
 const PATH_REGEX = /(?<![\w\\/~.:-])(?:[A-Za-z]:|~)(?:[\\/][\w.+@%$-]*[\w+@%$-])+[\\/]?/g;
-const TEXT_SATURATION = 0.55;   // her colour at this fraction of the saturation for typed commands
-const PATH_SATURATION = 0.4;
+const TEXT_SATURATION = setting('TEXT_SATURATION', 0.55);   // her colour at this fraction of the saturation for typed commands
+const PATH_SATURATION = setting('PATH_SATURATION', 0.4);
 const CHAR_SLOTS = 100;         // palette slots 100…117: per character name / text / path colours, 118: red accent
 const RED_SLOT = 118;
-const FOCUS_TINT = 0.08;        // focused pane background: this much of her colour mixed in (when a tab has several panes)
+const FOCUS_TINT = setting('FOCUS_TINT', 0.08);        // focused pane background: this much of her colour mixed in (when a tab has several panes)
 
 // [name, colour on dark, colour on light]
 const CHARACTERS = [
@@ -55,6 +69,8 @@ const KYUBEY_GREYS = {   // name / text / path / accent: Kyubey is only white, g
   light: ['#1f1f24', '#46464c', '#6b6b72', '#7a7a80'],
 };
 const ALL_CHARACTERS = [...CHARACTERS, KYUBEY];
+
+for (const key of Object.keys(magica.settings)) if (!usedSettings.has(key)) console.warn(`settings.json: unknown setting "${key}"`);
 
 const THEMES = {   // Tiro Finale palettes
   dark: { bg: '#1d1d1c', fg: '#d4d2cc', dim: '#7f7d78', selFg: '#1b1a1f', palette: [
@@ -147,7 +163,6 @@ class Pane {
     this.failing = false;
     this.cmdStart = null;
     this.stretch = 1; this.widen = 1; this.hopOffset = 0;   // breathing, squash, hops
-    this.title = '';
     this.id = null;
 
     this.el = el('div', 'pane');
@@ -181,7 +196,26 @@ class Pane {
       this.cwd = data.slice(2).replace(/^"(.*)"$/, '$1');
       return true;
     });
-    this.term.onTitleChange(t => { this.title = t; this.win.updateTitle(); });
+    // the background is transparent (for the figure), so answer "what's your background?" (OSC 11) with the theme's
+    // real one; programs like Claude Code pick their light or dark colours from it
+    this.term.parser.registerOscHandler(11, data => {
+      if (data !== '?') return false;
+      const hex = THEMES[this.win.theme].bg.slice(1);
+      this.reply(`\x1b]11;rgb:${[0, 2, 4].map(i => hex.slice(i, i + 2).repeat(2)).join('/')}\x1b\\`);
+      return true;
+    });
+    // colour scheme reports (mode 2031, as in VTE): `CSI ? 996 n` asks for dark (1) / light (2), and programs that turn
+    // on mode 2031 are told when it changes
+    this.colourReports = false;
+    this.reportedTheme = win.theme;
+    const mode2031 = on => params => { if (params.includes(2031)) this.colourReports = on; return false; };
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, mode2031(true));
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, mode2031(false));
+    this.term.parser.registerCsiHandler({ prefix: '?', final: 'n' }, params => {
+      if (params[0] !== 996) return false;
+      this.reportColourScheme();
+      return true;
+    });
     this.term.onData(d => { this.touch(); if (this.id) magica.write(this.id, d); });
     this.term.onWriteParsed(() => this.touch());
     this.term.attachCustomKeyEventHandler(e => !(e.type === 'keydown' && this.win.onKey(e)));
@@ -229,9 +263,15 @@ class Pane {
     return theme;
   }
 
+  reply(data) { if (this.id) magica.write(this.id, data); }
+
+  reportColourScheme() { this.reply(`\x1b[?997;${this.win.theme === 'dark' ? 1 : 2}n`); }
+
   applyTheme() {   // re-colour for the window's light/dark theme or a new character
     this.colour = this.win.theme === 'dark' ? this.character[1] : this.character[2];
     this.term.options.theme = this.xtermTheme();
+    if (this.colourReports && this.reportedTheme !== this.win.theme) this.reportColourScheme();
+    this.reportedTheme = this.win.theme;
     this.search.style.borderColor = this.colour;
     this._baseKey = null;
     this.updateFigure();
@@ -724,12 +764,7 @@ class MagicaWindow {
 
   // ── misc ──
   updateTitle() {
-    // window title: the terminal's own title for a single pane, "Tab N" once a tab holds several panes
-    const tab = this.current;
-    if (tab && this.active) {
-      document.title = tab.panes().length > 1 ? `Tab ${this.tabs.indexOf(tab) + 1}`
-                                              : this.active.title || 'Magica Terminal';
-    }
+    document.title = 'Magica Terminal';   // always; the tab labels say which character / tab is which
     this.tabs.forEach((t, i) => {
       const panes = t.panes();
       t.label.textContent = panes.length > 1 ? `Tab ${i + 1}` : title(panes[0].name);
@@ -784,6 +819,12 @@ class MagicaWindow {
     if (ctrl && !shift && !alt && (e.key === 'PageUp' || e.key === 'PageDown') && this.tabs.length > 1) {
       const step = e.key === 'PageUp' ? -1 : 1, n = this.tabs.length;
       this.selectTab(this.tabs[(this.tabs.indexOf(this.current) + step + n) % n]);
+      return true;
+    }
+    const digit = /^(Digit|Numpad)([1-9])$/.exec(e.code);
+    if (ctrl && !shift && !alt && digit) {   // like Chrome: Ctrl+1…8 picks that tab, Ctrl+9 the last one
+      const i = +digit[2], tab = i === 9 ? this.tabs[this.tabs.length - 1] : this.tabs[i - 1];
+      if (tab) this.selectTab(tab);
       return true;
     }
     return false;

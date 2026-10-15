@@ -9,6 +9,7 @@ const pty = require('node-pty');
 const CONFIG = path.join(app.getPath('appData'), 'magica-terminal');
 const THEME_FILE = path.join(CONFIG, 'theme');          // "light", "dark" or "system"
 const SESSION_FILE = path.join(CONFIG, 'session.json'); // tabs / splits saved on close
+const SETTINGS_FILE = path.join(CONFIG, 'settings.json'); // overrides renderer.js settings (see there)
 const INTEGRATION = path.join(__dirname, 'shell', 'magica.ps1');
 const APP_ID = 'dev.local.MagicaTerminal';
 const HOTKEY = 'CTRL+ALT+T';   // opens a new window from anywhere (Start Menu shortcut key; '' = none)
@@ -124,6 +125,15 @@ ipcMain.handle('init', () => {
     try { session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); } catch {}
   }
   return { theme: readTheme(), session, command };
+});
+ipcMain.on('settings', e => {   // synchronous: renderer.js needs them before its first line runs
+  let settings = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.warn(`${SETTINGS_FILE}: ignored (${err.message})`);
+  }
+  e.returnValue = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
 });
 ipcMain.on('theme:save', (_, name) => writeFile(THEME_FILE, name + '\n'));
 ipcMain.handle('clipboard:read', () => clipboard.readText());

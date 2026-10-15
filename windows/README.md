@@ -32,7 +32,8 @@ else (without the shell integration). `shell/magica.ps1` is dot-sourced after yo
 
 ## Differences from the Linux version
 
-- Settings are the constants at the top of `renderer.js`. The shell, config folder and window live in `main.js`.
+- Settings are the constants at the top of `renderer.js`; those wrapped in `setting()` can be overridden in
+  `%APPDATA%\magica-terminal\settings.json` by their lower-case names. The shell, config folder and window live in `main.js`.
 - Config and session are in `%APPDATA%\magica-terminal\`.
 - Ctrl+click opens URLs, OSC 8 links and Windows paths (`C:\…`, `~\…`) that exist.
 - Ctrl+C in PowerShell ends a native program with `STATUS_CONTROL_C_EXIT`, which doesn't count as a failure (like 130

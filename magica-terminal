@@ -25,7 +25,8 @@ A command that fails squashes her and tints her figure and the bar under it red 
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
 reports commands to the terminal with VTE's OSC 666 vte.shell.preexec / vte.shell.postexec=<status>.
 
-Settings live in the constants below; figures in figures/<name>.png next to the script.
+Settings live in the constants below, and ~/.config/magica-terminal/settings.json can override most of them
+(see SETTINGS); figures in figures/<name>.png next to the script.
 """
 import colorsys
 import json
@@ -66,7 +67,7 @@ JUMP_HEIGHT = 20          # every successful command: one small jump of this hei
 NOTIFY = True             # …and a desktop notification when the window isn't active
 IDLE_AFTER = 15           # s without output or typing before she starts idling (0 = off)
 IDLE_EVERY = (6, 14)      # s between idle moves (random in this range)
-IDLE_BOB, IDLE_BREATH = 6, 0.04   # idle moves: a double bob this high (px) / a breath stretching her this much taller
+IDLE_BOB, IDLE_BREATH = 12, 0.04  # idle moves: a double bob this high (px) / a breath stretching her this much taller
 
 # Ctrl+click opens these (PCRE2); file paths only if they exist. Programs' own OSC 8 hyperlinks work too.
 LINK_REGEXES = [
@@ -107,6 +108,57 @@ KYUBEY_GREYS = {   # name / text / path / accent ('@pmmm' and '#') — Kyubey is
     "light": ("#1f1f24", "#46464c", "#6b6b72", "#7a7a80"),
 }
 ALL_CHARACTERS = CHARACTERS + [KYUBEY]
+
+# ~/.config/magica-terminal/settings.json overrides the constants below by their lower-case names,
+# e.g. {"idle_bob": 16, "font": "Monospace 12", "idle_every": [4, 8], "notify": false}
+SETTINGS_FILE = os.path.expanduser("~/.config/magica-terminal/settings.json")
+SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HEIGHT", "BASE_GAP", "HOVER_OPACITY",
+            "FAIL_FLASH", "FAIL_TINT", "FAIL_SQUASH", "FAIL_RED", "IGNORED_EXIT", "LONG_COMMAND", "HOP_HEIGHT", "HOPS",
+            "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH",
+            "UNFOCUSED_OVERLAY", "TEXT_SATURATION", "PATH_SATURATION", "FOCUS_BRIGHTEN", "FOCUS_TINT",
+            "UNFOCUSED_SATURATION"]
+
+
+def load_settings():
+    def warn(msg):
+        print(f"magica-terminal: {SETTINGS_FILE}: {msg}", file=sys.stderr)
+
+    def valid(default, value):
+        if isinstance(default, bool) or isinstance(value, bool):
+            return isinstance(default, bool) and isinstance(value, bool)
+        if isinstance(default, (int, float)):
+            return isinstance(value, (int, float))
+        if isinstance(default, tuple):
+            return isinstance(value, list) and len(value) == len(default) and all(valid(d, v) for d, v in zip(default, value))
+        if isinstance(default, set):
+            return isinstance(value, list) and all(isinstance(v, int) and not isinstance(v, bool) for v in value)
+        if isinstance(default, dict):
+            return isinstance(value, dict) and all(k in default and valid(default[k], v) for k, v in value.items())
+        return isinstance(value, type(default))
+
+    try:
+        with open(SETTINGS_FILE) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError) as e:
+        return warn(f"ignored ({e})")
+    if not isinstance(data, dict):
+        return warn("ignored (not a JSON object)")
+    g = globals()
+    for key, value in data.items():
+        name = key.upper()
+        if name not in SETTINGS:
+            warn(f"unknown setting {key!r}")
+        elif not valid(g[name], value):
+            warn(f"bad value for {key!r}: {value!r}")
+        else:
+            default = g[name]
+            g[name] = tuple(value) if isinstance(default, tuple) else set(value) if isinstance(default, set) \
+                else {**default, **value} if isinstance(default, dict) else value
+
+
+load_settings()
 
 THEMES = {   # Tiro Finale palettes (same as the Ghostty themes)
     "dark": dict(bg="#1d1d1c", fg="#d4d2cc", dim="#7f7d78", sel_fg="#1b1a1f", palette=[
@@ -892,13 +944,8 @@ class Window(Gtk.ApplicationWindow):
 
     # ── misc ──
     def update_title(self):
-        """Header: the terminal's own title for a single pane, "Tab N" once a tab holds several panes."""
-        holder = self.current_holder()
-        if holder is not None and self.active:
-            if len(self.panes_in(holder)) > 1:
-                self.set_title(f"Tab {self.tabs.get_current_page() + 1}")
-            else:
-                self.set_title(self.active.term.get_window_title() or "Magica Terminal")
+        """Header: always "Magica Terminal"; the tab labels say which character / tab is which."""
+        self.set_title("Magica Terminal")
         self.update_tab_label()
         self.update_frames()
         self.load_css()
@@ -956,10 +1003,18 @@ class Window(Gtk.ApplicationWindow):
             if event.keyval in moves:
                 self.move_focus(*moves[event.keyval])
                 return True
-        if state == ctrl and event.keyval in (Gdk.KEY_Page_Up, Gdk.KEY_Page_Down):
+        digits = {getattr(Gdk, f"KEY_{i}"): i for i in range(1, 10)}
+        digits.update({getattr(Gdk, f"KEY_KP_{i}"): i for i in range(1, 10)})
+        if state == ctrl and (event.keyval in (Gdk.KEY_Page_Up, Gdk.KEY_Page_Down) or event.keyval in digits):
             n = self.tabs.get_n_pages()
-            step = -1 if event.keyval == Gdk.KEY_Page_Up else 1
-            self.tabs.set_current_page((self.tabs.get_current_page() + step) % n)
+            if event.keyval in digits:   # like Chrome: Ctrl+1…8 picks that tab, Ctrl+9 the last one
+                i = digits[event.keyval]
+                if i != 9 and i > n:
+                    return True
+                self.tabs.set_current_page(n - 1 if i == 9 else i - 1)
+            else:
+                step = -1 if event.keyval == Gdk.KEY_Page_Up else 1
+                self.tabs.set_current_page((self.tabs.get_current_page() + step) % n)
             panes = self.panes_in(self.current_holder())
             if panes:
                 panes[0].term.grab_focus()
