@@ -7,7 +7,7 @@ colour. Unfocused panes keep their colours, just less saturated.
 
 Keys
   Ctrl+Shift+O / Ctrl+Shift+E   split right / split down
-  Ctrl+Shift+W                  close pane
+  Ctrl+Shift+W                  close pane (or the `browser` page over it)
   Ctrl+Alt+Arrows               move focus between panes
   Ctrl+Shift+T                  new tab          Ctrl+PageUp / PageDown   previous / next tab
   Ctrl+Shift+C / Ctrl+Shift+V   copy / paste
@@ -19,11 +19,14 @@ Typing `pair` (Madoka | Homura) or `magica` (Madoka, Homura above; Sayaka, Mami,
 tab with those characters; the pane you typed it in becomes Madoka (in a new tab if this one is already split).
 Typing `crush` opens Magica Crush, a pixel-art match-3 game with the soul gems, over that pane (Esc / q to go back);
 `magica-terminal --crush` does the same inside a pane, and opens a window with it from anywhere else.
+Typing `browser [address or search]` opens a web page over that pane (WebKitGTK; ✕ or Ctrl+Shift+W goes back;
+Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload). Logins and cookies are kept in ~/.local/share/magica-terminal/web.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
-Hovering the mouse over a figure fades it so the text behind is readable.
+Hovering the mouse over a figure fades it so the text behind is readable; text (or coloured cells) behind
+her solid part makes her translucent too.
 A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
 reports commands to the terminal with VTE's OSC 666 vte.shell.preexec / vte.shell.postexec=<status>.
@@ -32,20 +35,28 @@ Settings live in the constants below, and ~/.config/magica-terminal/settings.jso
 (see SETTINGS); figures in figures/<name>.png next to the script.
 """
 import cairo
+import html
 import colorsys
 import itertools
 import json
 import math
 import os
 import random
+import re
 import subprocess
 import sys
 import time
+import urllib.parse
 import warnings
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Vte", "2.91")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango, Vte, Gio
+try:
+    gi.require_version("WebKit2", "4.1")
+    from gi.repository import WebKit2
+except (ValueError, ImportError):   # `browser` needs gir1.2-webkit2-4.1
+    WebKit2 = None
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)   # VTE 0.78+ deprecates get_window_title
 
@@ -61,6 +72,8 @@ PADDING = 10              # px around the text
 FIG_HEIGHT, FIG_RIGHT, FIG_BOTTOM = 240, 30, 12
 BASE_HEIGHT, BASE_GAP = 5, 4   # coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
 HOVER_OPACITY = 0.25      # figure opacity while the mouse is over it
+TEXT_OPACITY = 0.55       # …and while there's text behind her (1 = off)
+TEXT_CONTRAST = 0.12      # text counts once its colour (or its cell's) differs from the background by this much (0…1)
 FAIL_FLASH = 0.5          # s the figure and the bar under it stay tinted red after a command fails (0 = off)
 FAIL_TINT = 0.5           # how much red is mixed into them
 FAIL_SQUASH = 0.15        # …and she gets squashed: this much shorter (and a bit wider) for a moment (0 = off)
@@ -81,6 +94,8 @@ CRUSH_AUTOPLAY_DELAY = 0.6  # …s autoplay waits between moves
 CRUSH_CHAIN_LUCK = 0.4    # …chance a head dropping in during a chain copies a neighbour (so chains keep going)
 CRUSH_LUCKY_STRIPES = 0.05  # …chance it drops in already striped
 CRUSH_CHAIN_FADE = 0.72   # …both shrink this much per chain step, so chains still end
+BROWSER_HOME = "https://www.google.com/"            # `browser` with nothing after it
+BROWSER_SEARCH = "https://www.google.com/search?q={}"  # `browser` with words that aren't an address
 
 # Ctrl+click opens these (PCRE2); file paths only if they exist. Programs' own OSC 8 hyperlinks work too.
 LINK_REGEXES = [
@@ -126,11 +141,12 @@ ALL_CHARACTERS = CHARACTERS + [KYUBEY]
 # e.g. {"idle_bob": 16, "font": "Monospace 12", "idle_every": [4, 8], "notify": false}
 SETTINGS_FILE = os.path.expanduser("~/.config/magica-terminal/settings.json")
 SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HEIGHT", "BASE_GAP", "HOVER_OPACITY",
+            "TEXT_OPACITY", "TEXT_CONTRAST",
             "FAIL_FLASH", "FAIL_TINT", "FAIL_SQUASH", "FAIL_RED", "IGNORED_EXIT", "LONG_COMMAND", "HOP_HEIGHT", "HOPS",
             "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH",
             "UNFOCUSED_OVERLAY", "TEXT_SATURATION", "PATH_SATURATION", "FOCUS_BRIGHTEN", "FOCUS_TINT",
             "UNFOCUSED_SATURATION", "CRUSH_SIZE", "CRUSH_SPEED", "CRUSH_HINT_AFTER", "CRUSH_AUTOPLAY", "CRUSH_AUTOPLAY_DELAY",
-            "CRUSH_CHAIN_LUCK", "CRUSH_LUCKY_STRIPES", "CRUSH_CHAIN_FADE"]
+            "CRUSH_CHAIN_LUCK", "CRUSH_LUCKY_STRIPES", "CRUSH_CHAIN_FADE", "BROWSER_HOME", "BROWSER_SEARCH"]
 
 
 def load_settings():
@@ -666,6 +682,34 @@ FONT_3X5 = {   # pixel font: 3x5 glyphs, rows top to bottom
 
 def hex_rgb(colour):
     return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def colour_diff(a, b):
+    """0…1: the largest channel difference between two colours."""
+    return max(abs(x - y) for x, y in zip(hex_rgb(a), hex_rgb(b))) / 255
+
+
+def shows_ink(snippet, fg, bg):
+    """Does this bit of VTE's HTML export show anything on a bg background? Text in a colour that stands out from
+    its cell, or a cell whose own background stands out, counts; blanks and text the colour of its cell don't."""
+    stack = [(fg, bg)]   # (text colour, cell colour) of the innermost open tag
+    for tag, text in re.findall(r"<([^>]*)>|([^<]+)", snippet):
+        ink, cell = stack[-1]
+        if text:
+            if colour_diff(cell, bg) > TEXT_CONTRAST or \
+                    (html.unescape(text).strip() and colour_diff(ink, cell) > TEXT_CONTRAST):
+                return True
+        elif tag.startswith("/"):
+            if len(stack) > 1 and tag != "/pre":
+                stack.pop()
+        elif tag != "pre":
+            m = re.search(r'(?:color="|background-color:)(#[0-9A-Fa-f]{6})', tag)
+            if m and "background-color" in tag:
+                cell = m.group(1)
+            elif m:
+                ink = m.group(1)
+            stack.append((ink, cell))
+    return False
 
 
 def pixels_to_surface(px):
@@ -1298,6 +1342,120 @@ class Crush(Gtk.EventBox):
                         self.fill(cr, colour, x, y, ww, hh, a)
 
 
+# ── browser: a web page over a pane (`browser [address or search]` in the shell) ──
+WEB_DATA = os.path.expanduser("~/.local/share/magica-terminal/web")   # cookies, logins, site storage
+WEB_CACHE = os.path.expanduser("~/.cache/magica-terminal/web")
+_web_context = None
+
+
+def web_context():
+    """One shared WebKit context for every pane, so logins carry over (and are kept between runs)."""
+    global _web_context
+    if _web_context is None:
+        os.makedirs(WEB_DATA, exist_ok=True)
+        data = WebKit2.WebsiteDataManager(base_data_directory=WEB_DATA, base_cache_directory=WEB_CACHE)
+        data.get_cookie_manager().set_persistent_storage(os.path.join(WEB_DATA, "cookies.sqlite"),
+                                                         WebKit2.CookiePersistentStorage.SQLITE)
+        _web_context = WebKit2.WebContext.new_with_website_data_manager(data)
+    return _web_context
+
+
+def web_address(text, cwd=None):
+    """What was typed → a URL: an address as is, an existing file, a host name, or else a search."""
+    text = text.strip()
+    if not text:
+        return BROWSER_HOME
+    if re.match(r"[a-z][a-z0-9+.-]*:(//|blank)", text, re.I):
+        return text
+    path = os.path.join(cwd or os.getcwd(), os.path.expanduser(text))
+    if os.path.exists(path):
+        return "file://" + urllib.parse.quote(os.path.abspath(path))
+    m = re.fullmatch(r"(localhost|[\d.]+|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,})(:\d+)?([/?#]\S*)?", text, re.I)
+    if m:
+        local = m.group(1) == "localhost" or m.group(1)[0].isdigit()
+        return ("http://" if local else "https://") + text
+    return BROWSER_SEARCH.format(urllib.parse.quote_plus(text))
+
+
+class Browser(Gtk.Box):
+    """`browser`: an address bar and a web page, over a pane's terminal (see Pane.open_browser)."""
+
+    def __init__(self, pane):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.pane = pane
+        self.get_style_context().add_class("magica-browser")
+        bar = Gtk.Box(spacing=2, margin=6)
+        def button(icon, tip, action):
+            b = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.MENU)
+            b.set_relief(Gtk.ReliefStyle.NONE)
+            b.set_tooltip_text(tip)
+            b.set_can_focus(False)
+            b.connect("clicked", lambda *_: action())
+            bar.pack_start(b, False, False, 0)
+            return b
+        self.view = WebKit2.WebView.new_with_context(web_context())
+        self.view.set_vexpand(True)
+        self.back = button("go-previous-symbolic", "Back (Alt+Left)", self.view.go_back)
+        self.forward = button("go-next-symbolic", "Forward (Alt+Right)", self.view.go_forward)
+        button("view-refresh-symbolic", "Reload (F5)", self.view.reload)
+        self.entry = Gtk.Entry(hexpand=True, placeholder_text="address or search")
+        self.entry.connect("activate", lambda e: self.load(e.get_text()))
+        self.entry.connect("key-press-event", self.on_entry_key)
+        bar.pack_start(self.entry, True, True, 4)
+        button("window-close-symbolic", "Close (Ctrl+Shift+W)", pane.close_browser)
+        self.pack_start(bar, False, False, 0)
+        self.pack_start(self.view, True, True, 0)
+        self.view.connect("notify::uri", lambda *_: self.show_uri())
+        self.view.connect("notify::estimated-load-progress", lambda *_: self.show_progress())
+        self.view.connect("load-changed", lambda *_: self.show_progress())
+        self.view.connect("create", self.on_create)
+        self.view.connect("web-process-terminated", lambda *_: self.view.reload())
+        self.connect("key-press-event", self.on_key)
+
+    def load(self, text):
+        self.view.load_uri(web_address(text, self.pane.cwd()))
+        self.view.grab_focus()
+
+    def show_uri(self):
+        if not self.entry.has_focus():
+            self.entry.set_text(self.view.get_uri() or "")
+        self.back.set_sensitive(self.view.can_go_back())
+        self.forward.set_sensitive(self.view.can_go_forward())
+
+    def show_progress(self):
+        p = self.view.get_estimated_load_progress()
+        self.entry.set_progress_fraction(0 if p >= 1 or not self.view.is_loading() else p)
+        self.show_uri()
+
+    def on_create(self, view, action):
+        """Links that want a new window (target=_blank, window.open) open here instead."""
+        view.load_request(action.get_request())
+        return None
+
+    def on_entry_key(self, entry, event):
+        if event.keyval == Gdk.KEY_Escape:   # put the page's address back and go back to the page
+            entry.set_text(self.view.get_uri() or "")
+            self.view.grab_focus()
+            return True
+        return False
+
+    def on_key(self, _, event):
+        state = event.state & Gtk.accelerator_get_default_mod_mask()
+        ctrl, alt = Gdk.ModifierType.CONTROL_MASK, Gdk.ModifierType.MOD1_MASK
+        key = Gdk.keyval_to_lower(event.keyval)
+        if state == ctrl and key == Gdk.KEY_l or event.keyval == Gdk.KEY_F6:
+            self.entry.grab_focus()
+        elif state == alt and event.keyval == Gdk.KEY_Left:
+            self.view.go_back()
+        elif state == alt and event.keyval == Gdk.KEY_Right:
+            self.view.go_forward()
+        elif event.keyval == Gdk.KEY_F5 or state == ctrl and key == Gdk.KEY_r:
+            self.view.reload()
+        else:
+            return False
+        return True
+
+
 class Pane(Gtk.Overlay):
     """One terminal over a backdrop with its character's figure."""
 
@@ -1305,6 +1463,7 @@ class Pane(Gtk.Overlay):
         super().__init__()
         self.win = app_window
         self.game = None          # the `crush` game while it's open over this pane
+        self.browser = None       # the `browser` page while it's open over this pane
         t = THEMES[app_window.theme]
         self.theme = t
         self.focused = False
@@ -1366,6 +1525,9 @@ class Pane(Gtk.Overlay):
         self.cmd_start = None
         self.failing = False
         self.hovering = False
+        self.covering = False     # text behind her figure
+        self._cover_spans = (None, None)   # (figure key, solid x span per pixel row)
+        self._cover_pending = False
         self.hop_offset = 0
         self.term.connect("termprop-changed", self.on_termprop)
         # fade the figure while the mouse is over it, so the text behind it is readable
@@ -1386,6 +1548,8 @@ class Pane(Gtk.Overlay):
         # idle moves after a while without output or typing
         self.last_activity = time.monotonic()
         self.term.connect("contents-changed", self.touch)
+        self.term.connect("contents-changed", lambda *_: self.queue_cover_check())
+        self.term.get_vadjustment().connect("value-changed", lambda *_: self.queue_cover_check())
         self.term.connect("commit", self.touch)
         if IDLE_AFTER:
             self._idle_id = GLib.timeout_add(int(random.uniform(*IDLE_EVERY) * 1000), self.idle_tick)
@@ -1433,6 +1597,38 @@ class Pane(Gtk.Overlay):
         self.game.show_all()
         self.game.grab_focus()
         self.update_figure()
+
+    def open_browser(self, text):
+        """`browser`: a web page covers the terminal (the shell waits underneath) until ✕ / Ctrl+Shift+W.
+        She stays in front, translucent."""
+        if WebKit2 is None:
+            self.term.feed(b"\r\n\x1b[31mbrowser needs WebKitGTK: sudo apt install gir1.2-webkit2-4.1\x1b[0m\r\n")
+            return
+        if not self.browser:
+            self.browser = Browser(self)
+            self.add_overlay(self.browser)
+            self.reorder_overlay(self.browser, 1)   # just above the terminal, under her figure
+            for w in (self.browser.view, self.browser.entry):
+                w.connect("focus-in-event", lambda *_: self.set_focused(True))
+                w.connect("focus-out-event", lambda *_: self.set_focused(False))
+            self.browser.view.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+            self.browser.view.connect("motion-notify-event", self.on_motion)
+            self.browser.view.connect("leave-notify-event", lambda *_: self.set_hovering(False))
+            self.browser.show_all()
+        if text.strip() or not self.browser.view.get_uri():
+            self.browser.load(text)
+        else:
+            self.browser.view.grab_focus()
+        self.queue_cover_check()
+
+    def close_browser(self):
+        if not self.browser:
+            return
+        self.browser.destroy()
+        self.browser = None
+        self.set_hovering(False)
+        self.queue_cover_check()
+        self.term.grab_focus()
 
     def close_game(self):
         if not self.game:
@@ -1492,6 +1688,10 @@ class Pane(Gtk.Overlay):
         title = self.term.get_window_title() or ""
         if title == "magica:crush":   # `crush` (see ~/.bashrc): the game, in this pane
             GLib.idle_add(lambda: self.open_game() and False)
+            return
+        if title.startswith("magica:browser:"):   # `browser [address or search]` (see ~/.bashrc)
+            text = title[len("magica:browser:"):]
+            GLib.idle_add(lambda: self.open_browser(text) and False)
             return
         if title.startswith("magica:layout:"):   # `pair` / `magica` (see ~/.bashrc); the shell already became Madoka
             name = title[len("magica:layout:"):].strip()
@@ -1563,8 +1763,8 @@ class Pane(Gtk.Overlay):
         self.frame_css.load_from_data(
             f".magica-frame {{ border: {FRAME_WIDTH}px solid {border}; background: {veil}; }}".encode())
 
-    def on_motion(self, _, event):
-        pos = self.img.translate_coordinates(self.term, 0, 0)
+    def on_motion(self, widget, event):
+        pos = self.img.translate_coordinates(widget, 0, 0)
         if pos:
             x, y = pos
             w, h = self.img.get_allocated_width(), self.img.get_allocated_height()
@@ -1576,8 +1776,54 @@ class Pane(Gtk.Overlay):
         self.update_opacity()
 
     def update_opacity(self):
-        self.img.set_opacity(HOVER_OPACITY if self.hovering else 1.0)
-        self.base.set_opacity(HOVER_OPACITY if self.hovering else 1.0)
+        op = HOVER_OPACITY if self.hovering else TEXT_OPACITY if self.covering else 1.0
+        self.img.set_opacity(op)
+        self.base.set_opacity(op)
+
+    # ── translucent while there's text behind her ──
+    def queue_cover_check(self):
+        if TEXT_OPACITY < 1 and not self._cover_pending:
+            self._cover_pending = True
+            GLib.idle_add(self.check_cover)
+
+    def solid_spans(self, pb):
+        """Per pixel row of the figure: (first, last) x where she's solid, or None."""
+        if self._cover_spans[0] != self._fig_key:
+            n, rs, w = pb.get_n_channels(), pb.get_rowstride(), pb.get_width()
+            px, solid = pb.get_pixels(), bytes(1 if a > 64 else 0 for a in range(256))
+            spans = []
+            for y in range(pb.get_height()):
+                row = px[y * rs:y * rs + w * n][3::n].translate(solid) if n == 4 else b"\1" * w
+                first = row.find(1)
+                spans.append(None if first < 0 else (first, row.rfind(1)))
+            self._cover_spans = (self._fig_key, spans)
+        return self._cover_spans[1]
+
+    def check_cover(self):
+        """Fade her if any cell behind her solid part shows text or a colour (vs. the theme background)."""
+        self._cover_pending = False
+        covering = self.browser is not None   # a page is always "text behind her"
+        pb, pos = self.img.get_pixbuf(), self.img.translate_coordinates(self.term, 0, 0)
+        if pb and pos and self.img.get_visible() and not covering:
+            spans = self.solid_spans(pb)
+            cw, ch = self.term.get_char_width(), self.term.get_char_height()
+            cols, top = self.term.get_column_count(), int(self.term.get_vadjustment().get_value())
+            fx, fy = pos[0] - PADDING, pos[1] - PADDING   # figure origin, relative to the first cell
+            for r in range(max(0, fy // ch), min(self.term.get_row_count(), (fy + len(spans) - 1) // ch + 1)):
+                xs = [s for s in spans[max(0, r * ch - fy):r * ch + ch - fy] if s]
+                if not xs:
+                    continue
+                c0 = max(0, (fx + min(a for a, _ in xs)) // cw)
+                c1 = min(cols, (fx + max(b for _, b in xs)) // cw + 1)
+                if c0 < c1:
+                    snippet, _ = self.term.get_text_range_format(Vte.Format.HTML, top + r, c0, top + r, c1)
+                    if shows_ink(snippet or "", self.theme["fg"], self.theme["bg"]):
+                        covering = True
+                        break
+        if covering != self.covering:
+            self.covering = covering
+            self.update_opacity()
+        return False
 
     # ── command finished: failure flash / hop / notification ──
     def on_termprop(self, term, name):
@@ -1722,6 +1968,7 @@ class Pane(Gtk.Overlay):
         # only under the focused pane's figure, or any pane's while a failure flashes
         self.base.set_visible(BASE_HEIGHT > 0 and (self.focused or self.failing))
         self.update_opacity()
+        self.queue_cover_check()
         colour = mix(self.colour, red, FAIL_TINT) if self.failing else self.colour
         css = f".magica-base {{ background: {colour}; border-radius: 99px; }}"
         if css != self._base_text:
@@ -1769,6 +2016,12 @@ class Window(Gtk.ApplicationWindow):
             notebook > header > tabs > tab:hover label {{ color: {t['fg']}; }}
             notebook > header > tabs > tab:checked {{ box-shadow: inset 0 -2px {accent}; }}
             notebook > header > tabs > tab:checked label {{ color: {t['fg']}; font-weight: bold; }}
+            .magica-browser {{ background: {t['bg']}; }}
+            .magica-browser entry {{ background: {t['bg']}; color: {t['fg']}; border: 1px solid {t['dim']}; border-radius: 6px; }}
+            .magica-browser entry:focus {{ border-color: {accent}; }}
+            .magica-browser entry progress {{ border-bottom: 2px solid {accent}; background: none; }}
+            .magica-browser button {{ color: {t['dim']}; }}
+            .magica-browser button:hover {{ color: {t['fg']}; }}
         """
         if css != getattr(self, "_css_text", None):     # reloaded on focus changes for the accent; skip if same
             self._css_text = css
@@ -2023,6 +2276,13 @@ class Window(Gtk.ApplicationWindow):
         state = event.state & Gtk.accelerator_get_default_mod_mask()
         ctrl, shift, alt = Gdk.ModifierType.CONTROL_MASK, Gdk.ModifierType.SHIFT_MASK, Gdk.ModifierType.MOD1_MASK
         key = Gdk.keyval_to_lower(event.keyval)
+        browsing = self.active and self.active.browser and self.get_focus() and \
+            self.get_focus().is_ancestor(self.active.browser)
+        if state == ctrl | shift and browsing and key in (Gdk.KEY_w, Gdk.KEY_c, Gdk.KEY_v, Gdk.KEY_f):
+            if key == Gdk.KEY_w:   # closes the page, not the pane; copy / paste / find are the page's own
+                self.active.close_browser()
+                return True
+            return False
         if state == ctrl | shift:
             actions = {
                 Gdk.KEY_o: lambda: self.split(Gtk.Orientation.HORIZONTAL),

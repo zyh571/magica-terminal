@@ -30,6 +30,8 @@ if [ -n "$MAGICA_CHAR" ]; then
   unset _magica_l
   # `crush`: a match-3 game with the soul gems, in this pane (Esc / q comes back to the prompt)
   crush() { printf '\033]0;magica:crush\007'; sleep 0.1; }   # (the sleep lets the terminal see the title before the prompt resets it)
+  # `browser [address or search]`: a web page in this pane (✕ or Ctrl+Shift+W comes back to the prompt)
+  browser() { printf '\033]0;magica:browser:%s\007' "$(printf '%s' "$*" | tr -d '\000-\037')"; sleep 0.1; }
   # `kyubey`: this pane becomes Kyubey and runs a root shell in place; `exit` brings her back
   kyubey() {
     sudo -v || return            # ask for the password first; no switch (and no clear) if it fails

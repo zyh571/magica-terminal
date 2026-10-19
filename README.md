@@ -11,7 +11,7 @@ Her HELLO! GOOD SMILE figure stands in the bottom-right corner, and the prompt, 
 ```
 
 Everything is linked back to this folder, so edits here show up in new windows. It needs `python3-gi`,
-`gir1.2-vte-2.91` (VTE 0.78+) and `notify-send`.
+`gir1.2-vte-2.91` (VTE 0.78+) and `notify-send`; `browser` also needs `gir1.2-webkit2-4.1`.
 
 ## Use
 
@@ -35,6 +35,10 @@ In the shell:
 - `pair` lays out Madoka | Homura; `magica` all five (Madoka, Homura above; Sayaka, Mami, Kyoko below).
 - `crush` opens Magica Crush in that pane (Linux only): a pixel-art match-3 game with the five soul gems. Esc or q
   goes back to the prompt.
+- `browser [address or search]` opens a web page over that pane (Linux only, WebKitGTK). ✕ or Ctrl+Shift+W
+  goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. She stays in front,
+  translucent. Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
+- A character turns translucent while there's text (or a coloured cell) behind her; `text_opacity` sets how much.
 
 Magica Crush: swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a
 striped gem (clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a
