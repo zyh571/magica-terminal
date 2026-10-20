@@ -12,33 +12,34 @@ FG, BG = "#d4d2cc", "#1d1d1c"
 
 
 def ink(snippet):
-    return mt.shows_ink(snippet, FG, BG)
+    return "".join("x" if on else "." for on in mt.cell_inks(snippet, FG, BG))
 
 
-class ShowsInk(unittest.TestCase):
+class CellInks(unittest.TestCase):
     def test_blank(self):
-        self.assertFalse(ink("<pre></pre>"))
-        self.assertFalse(ink("<pre>      </pre>"))
+        self.assertEqual(ink("<pre></pre>"), "")
+        self.assertEqual(ink("<pre>      </pre>"), "......")
 
     def test_plain_text(self):
-        self.assertTrue(ink("<pre>  ls -la</pre>"))
+        self.assertEqual(ink("<pre>  ls -la</pre>"), "..xx.xxx")
 
     def test_coloured_cell_without_text(self):
-        self.assertTrue(ink('<pre><span style="background-color:#C00000">   </span></pre>'))
+        self.assertEqual(ink('<pre><span style="background-color:#C00000">   </span></pre>'), "xxx")
 
     def test_cell_the_colour_of_the_background(self):
-        self.assertFalse(ink('<pre><span style="background-color:#1E1E1D">   </span></pre>'))
+        self.assertEqual(ink('<pre><span style="background-color:#1E1E1D">   </span></pre>'), "...")
 
     def test_text_the_colour_of_its_cell(self):
-        self.assertFalse(ink('<pre><font color="#1F1F1E">hidden</font></pre>'))
-        self.assertTrue(ink('<pre><font color="#878700">slot</font></pre>'))
+        self.assertEqual(ink('<pre><font color="#1F1F1E">hidden</font></pre>'), "......")
+        self.assertEqual(ink('<pre><font color="#878700">slot</font></pre>'), "xxxx")
 
     def test_nesting(self):
-        self.assertTrue(ink('<pre><span style="background-color:#D4D2CC"><font color="#000000">R</font></span></pre>'))
-        self.assertFalse(ink('<pre><font color="#1D1D1C">x</font> </pre>'))
+        self.assertEqual(ink('<pre><span style="background-color:#D4D2CC"><font color="#000000">R</font> </span>a</pre>'), "xxx")
+        self.assertEqual(ink('<pre><font color="#1D1D1C">x</font> y</pre>'), "..x")
 
-    def test_entities(self):
-        self.assertTrue(ink("<pre>&lt;</pre>"))
+    def test_entities_newlines_and_wide_characters(self):
+        self.assertEqual(ink("<pre>&lt; a\n</pre>"), "x.x")
+        self.assertEqual(ink("<pre>魔法 x</pre>"), "xxxx.x")
 
 
 if __name__ == "__main__":

@@ -36,12 +36,13 @@ In the shell:
 - `crush` opens Magica Crush in that pane (Linux only): a pixel-art match-3 game with the five soul gems. Esc or q
   goes back to the prompt.
 - `browser [address or search]` opens a web page over that pane (Linux only, WebKitGTK). ✕ or Ctrl+Shift+W
-  goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. She stays in front,
-  translucent. Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
+  goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. A video's full screen
+  fills the pane (Esc leaves it). She stays in front, translucent. Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
 - `space [folder]` shows what takes up the disk there (Linux only): every item with a bar for its size, biggest
   first, filling in while it scans. Click a folder (or `..`) to go into it, double-click a file to open it;
   Backspace goes up (past where you started, too), C cds the shell into the folder on show, Esc or q goes back.
-- A character turns translucent while there's text (or a coloured cell) behind her; `text_opacity` sets how much.
+- A character turns translucent while there's text (or a coloured cell) behind her, the more of it
+  (averaged over everything behind her), the more; `text_opacity` sets how far, `text_full` how much text it takes.
 
 Magica Crush: swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a
 striped gem (clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a

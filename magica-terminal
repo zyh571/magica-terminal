@@ -20,7 +20,8 @@ tab with those characters; the pane you typed it in becomes Madoka (in a new tab
 Typing `crush` opens Magica Crush, a pixel-art match-3 game with the soul gems, over that pane (Esc / q to go back);
 `magica-terminal --crush` does the same inside a pane, and opens a window with it from anywhere else.
 Typing `browser [address or search]` opens a web page over that pane (WebKitGTK; ✕ or Ctrl+Shift+W goes back;
-Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload). Logins and cookies are kept in ~/.local/share/magica-terminal/web.
+Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload; a video's full screen fills the pane, Esc leaves it).
+Logins and cookies are kept in ~/.local/share/magica-terminal/web.
 Typing `space [folder]` shows what takes up the disk there: every item with a bar for its size, biggest first. Click a
 folder (or ..) to go into it, double-click a file to open it; Backspace goes up, C cds the shell there, Esc / q goes back.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
@@ -28,7 +29,7 @@ Closing the window saves its tabs, splits, characters and folders (~/.config/mag
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
 Hovering the mouse over a figure fades it so the text behind is readable; text (or coloured cells) behind
-her solid part makes her translucent too.
+her solid part makes her translucent too, the more of it, the more.
 A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
 reports commands to the terminal with VTE's OSC 666 vte.shell.preexec / vte.shell.postexec=<status>.
@@ -51,6 +52,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
 import warnings
 import gi
@@ -77,7 +79,8 @@ PADDING = 10              # px around the text
 FIG_HEIGHT, FIG_RIGHT, FIG_BOTTOM = 240, 30, 12
 BASE_HEIGHT, BASE_GAP = 5, 4   # coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
 HOVER_OPACITY = 0.25      # figure opacity while the mouse is over it
-TEXT_OPACITY = 0.55       # …and while there's text behind her (1 = off)
+TEXT_OPACITY = 0.3        # …and while there's text behind her (1 = off); less text behind her, less fading
+TEXT_FULL = 0.2           # …she's faded all the way once this share of what's behind her (by area) is text
 TEXT_CONTRAST = 0.12      # text counts once its colour (or its cell's) differs from the background by this much (0…1)
 FAIL_FLASH = 0.5          # s the figure and the bar under it stay tinted red after a command fails (0 = off)
 FAIL_TINT = 0.5           # how much red is mixed into them
@@ -146,7 +149,7 @@ ALL_CHARACTERS = CHARACTERS + [KYUBEY]
 # e.g. {"idle_bob": 16, "font": "Monospace 12", "idle_every": [4, 8], "notify": false}
 SETTINGS_FILE = os.path.expanduser("~/.config/magica-terminal/settings.json")
 SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HEIGHT", "BASE_GAP", "HOVER_OPACITY",
-            "TEXT_OPACITY", "TEXT_CONTRAST",
+            "TEXT_OPACITY", "TEXT_FULL", "TEXT_CONTRAST",
             "FAIL_FLASH", "FAIL_TINT", "FAIL_SQUASH", "FAIL_RED", "IGNORED_EXIT", "LONG_COMMAND", "HOP_HEIGHT", "HOPS",
             "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH",
             "UNFOCUSED_OVERLAY", "TEXT_SATURATION", "PATH_SATURATION", "FOCUS_BRIGHTEN", "FOCUS_TINT",
@@ -694,16 +697,17 @@ def colour_diff(a, b):
     return max(abs(x - y) for x, y in zip(hex_rgb(a), hex_rgb(b))) / 255
 
 
-def shows_ink(snippet, fg, bg):
-    """Does this bit of VTE's HTML export show anything on a bg background? Text in a colour that stands out from
-    its cell, or a cell whose own background stands out, counts; blanks and text the colour of its cell don't."""
-    stack = [(fg, bg)]   # (text colour, cell colour) of the innermost open tag
+def cell_inks(snippet, fg, bg):
+    """Which cells of this bit of VTE's HTML export show anything on a bg background: one bool per character. Text in
+    a colour that stands out from its cell, or a cell whose own background stands out, counts; blanks and text the
+    colour of its cell don't."""
+    stack, inks = [(fg, bg)], []   # (text colour, cell colour) of the innermost open tag
     for tag, text in re.findall(r"<([^>]*)>|([^<]+)", snippet):
         ink, cell = stack[-1]
         if text:
-            if colour_diff(cell, bg) > TEXT_CONTRAST or \
-                    (html.unescape(text).strip() and colour_diff(ink, cell) > TEXT_CONTRAST):
-                return True
+            filled, visible = colour_diff(cell, bg) > TEXT_CONTRAST, colour_diff(ink, cell) > TEXT_CONTRAST
+            for ch in html.unescape(text).replace("\n", ""):   # wide characters take two cells
+                inks += [filled or (visible and not ch.isspace())] * (2 if unicodedata.east_asian_width(ch) in "WF" else 1)
         elif tag.startswith("/"):
             if len(stack) > 1 and tag != "/pre":
                 stack.pop()
@@ -714,7 +718,7 @@ def shows_ink(snippet, fg, bg):
             elif m:
                 ink = m.group(1)
             stack.append((ink, cell))
-    return False
+    return inks
 
 
 def pixels_to_surface(px):
@@ -1408,8 +1412,12 @@ class Browser(Gtk.Box):
         self.entry.connect("key-press-event", self.on_entry_key)
         bar.pack_start(self.entry, True, True, 4)
         button("window-close-symbolic", "Close (Ctrl+Shift+W)", pane.close_browser)
+        self.bar = bar
         self.pack_start(bar, False, False, 0)
         self.pack_start(self.view, True, True, 0)
+        self.fullscreen = False   # a page's full screen (a video's, say) fills just the pane
+        self.view.connect("enter-fullscreen", lambda *_: self.set_fullscreen(True))
+        self.view.connect("leave-fullscreen", lambda *_: self.set_fullscreen(False))
         self.view.connect("notify::uri", lambda *_: self.show_uri())
         self.view.connect("notify::estimated-load-progress", lambda *_: self.show_progress())
         self.view.connect("load-changed", lambda *_: self.show_progress())
@@ -1431,6 +1439,14 @@ class Browser(Gtk.Box):
         p = self.view.get_estimated_load_progress()
         self.entry.set_progress_fraction(0 if p >= 1 or not self.view.is_loading() else p)
         self.show_uri()
+
+    def set_fullscreen(self, on):
+        """Handling WebKit's signal keeps the window as it is: the page goes full screen inside the view, which
+        then fills the pane (no address bar, no figure). Esc or f leaves it."""
+        self.fullscreen = on
+        self.bar.set_visible(not on)
+        self.pane.update_figure()
+        return True
 
     def on_create(self, view, action):
         """Links that want a new window (target=_blank, window.open) open here instead."""
@@ -1815,7 +1831,7 @@ class Pane(Gtk.Overlay):
         self.cmd_start = None
         self.failing = False
         self.hovering = False
-        self.covering = False     # text behind her figure
+        self.cover = 0.0          # how much of what's behind her figure is text (0…1)
         self._cover_spans = (None, None)   # (figure key, solid x span per pixel row)
         self._cover_pending = False
         self.hop_offset = 0
@@ -2094,15 +2110,15 @@ class Pane(Gtk.Overlay):
         self.update_opacity()
 
     def update_opacity(self):
-        op = HOVER_OPACITY if self.hovering else TEXT_OPACITY if self.covering else 1.0
+        op = HOVER_OPACITY if self.hovering else 1 - (1 - TEXT_OPACITY) * min(1.0, self.cover / max(TEXT_FULL, 0.01))
         self.img.set_opacity(op)
         self.base.set_opacity(op)
 
     # ── translucent while there's text behind her ──
     def queue_cover_check(self):
-        if TEXT_OPACITY < 1 and not self._cover_pending:
+        if TEXT_OPACITY < 1 and not self._cover_pending:   # at most every 100 ms, however fast the output
             self._cover_pending = True
-            GLib.idle_add(self.check_cover)
+            GLib.timeout_add(100, self.check_cover)
 
     def solid_spans(self, pb):
         """Per pixel row of the figure: (first, last) x where she's solid, or None."""
@@ -2118,28 +2134,38 @@ class Pane(Gtk.Overlay):
         return self._cover_spans[1]
 
     def check_cover(self):
-        """Fade her if any cell behind her solid part shows text or a colour (vs. the theme background)."""
+        """Fade her by how much of what's behind her solid part shows text or a colour (vs. the theme background):
+        every cell behind her counts, by how much of her covers it."""
         self._cover_pending = False
-        covering = self.browser is not None or self.space is not None   # a page / list is always "text behind her"
+        cover = 0.0
         pb, pos = self.img.get_pixbuf(), self.img.translate_coordinates(self.term, 0, 0)
-        if pb and pos and self.img.get_visible() and not covering:
+        if self.browser or self.space:
+            cover = 1.0   # a page / list is all "text behind her"
+        elif pb and pos and self.img.get_visible():
             spans = self.solid_spans(pb)
             cw, ch = self.term.get_char_width(), self.term.get_char_height()
-            cols, top = self.term.get_column_count(), int(self.term.get_vadjustment().get_value())
+            cols, rows, top = self.term.get_column_count(), self.term.get_row_count(), int(self.term.get_vadjustment().get_value())
             fx, fy = pos[0] - PADDING, pos[1] - PADDING   # figure origin, relative to the first cell
-            for r in range(max(0, fy // ch), min(self.term.get_row_count(), (fy + len(spans) - 1) // ch + 1)):
-                xs = [s for s in spans[max(0, r * ch - fy):r * ch + ch - fy] if s]
-                if not xs:
+            weights, total = {}, 0   # (row, col) → pixels of her in front of that cell
+            for y, span in enumerate(spans):
+                if not span:
                     continue
-                c0 = max(0, (fx + min(a for a, _ in xs)) // cw)
-                c1 = min(cols, (fx + max(b for _, b in xs)) // cw + 1)
-                if c0 < c1:
-                    snippet, _ = self.term.get_text_range_format(Vte.Format.HTML, top + r, c0, top + r, c1)
-                    if shows_ink(snippet or "", self.theme["fg"], self.theme["bg"]):
-                        covering = True
-                        break
-        if covering != self.covering:
-            self.covering = covering
+                x0, x1 = fx + span[0], fx + span[1] + 1
+                total += x1 - x0
+                r = (fy + y) // ch
+                if 0 <= (fy + y) and r < rows:
+                    for c in range(max(0, x0 // cw), min(cols, (x1 - 1) // cw + 1)):
+                        weights[r, c] = weights.get((r, c), 0) + min(x1, (c + 1) * cw) - max(x0, c * cw)
+            ink = 0
+            for r in {r for r, _ in weights}:
+                c0 = min(c for rr, c in weights if rr == r)
+                c1 = max(c for rr, c in weights if rr == r) + 1
+                snippet, _ = self.term.get_text_range_format(Vte.Format.HTML, top + r, c0, top + r, c1)
+                inks = cell_inks(snippet or "", self.theme["fg"], self.theme["bg"])
+                ink += sum(weights.get((r, c0 + i), 0) for i, on in enumerate(inks[:c1 - c0]) if on)
+            cover = ink / total if total else 0.0
+        if abs(cover - self.cover) > 0.005:
+            self.cover = cover
             self.update_opacity()
         return False
 
@@ -2262,8 +2288,9 @@ class Pane(Gtk.Overlay):
         w, h = self.get_allocated_width(), self.get_allocated_height()
         if w <= 1 or h <= 1:
             return False
-        self.img.set_visible(self.game is None)   # no figure or bar while the game is open
-        if self.game:
+        hidden = self.game or self.browser and self.browser.fullscreen   # no figure or bar over the game or a video
+        self.img.set_visible(not hidden)
+        if hidden:
             self.base.set_visible(False)
             return False
         s = max(w / 1920, h / 1080)
