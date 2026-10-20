@@ -218,7 +218,11 @@ class Pane {
     });
     this.term.onData(d => { this.touch(); if (this.id) magica.write(this.id, d); });
     this.term.onWriteParsed(() => this.touch());
-    this.term.attachCustomKeyEventHandler(e => !(e.type === 'keydown' && this.win.onKey(e)));
+    this.term.attachCustomKeyEventHandler(e => {
+      if (e.type !== 'keydown' || !this.win.onKey(e)) return true;
+      e.preventDefault();   // or Chromium's own copy / paste runs too (Ctrl+Shift+V pasted twice)
+      return false;
+    });
 
     this.search.addEventListener('input', () => this.find(true, true));
     this.search.addEventListener('keydown', e => this.onSearchKey(e));
