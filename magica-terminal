@@ -7,7 +7,7 @@ colour. Unfocused panes keep their colours, just less saturated.
 
 Keys
   Ctrl+Shift+O / Ctrl+Shift+E   split right / split down
-  Ctrl+Shift+W                  close pane (or the `browser` page over it)
+  Ctrl+Shift+W                  close pane (or the `browser` page / `space` view over it)
   Ctrl+Alt+Arrows               move focus between panes
   Ctrl+Shift+T                  new tab          Ctrl+PageUp / PageDown   previous / next tab
   Ctrl+Shift+C / Ctrl+Shift+V   copy / paste
@@ -21,6 +21,8 @@ Typing `crush` opens Magica Crush, a pixel-art match-3 game with the soul gems, 
 `magica-terminal --crush` does the same inside a pane, and opens a window with it from anywhere else.
 Typing `browser [address or search]` opens a web page over that pane (WebKitGTK; ✕ or Ctrl+Shift+W goes back;
 Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload). Logins and cookies are kept in ~/.local/share/magica-terminal/web.
+Typing `space [folder]` shows what takes up the disk there: every item with a bar for its size, biggest first. Click a
+folder (or ..) to go into it, double-click a file to open it; Backspace goes up, C cds the shell there, Esc / q goes back.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
@@ -42,9 +44,12 @@ import json
 import math
 import os
 import random
+import shlex
 import re
+import stat
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import warnings
@@ -1456,6 +1461,290 @@ class Browser(Gtk.Box):
         return True
 
 
+# ── space: what takes up the disk in a folder (`space [folder]` in the shell) ──
+SPACE_ROWS = 300   # items shown per folder; the rest are summed up in one row
+
+
+def human_size(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+class Usage:
+    """A file or folder and the disk space it takes (blocks actually used, like du). Folders fill in while scanning."""
+    __slots__ = ("name", "parent", "size", "children", "listed", "error")
+
+    def __init__(self, name, parent, folder):
+        self.name, self.parent, self.size = name, parent, 0
+        self.children = {} if folder else None
+        self.listed = not folder   # a folder's own entries have been read
+        self.error = None
+
+    @property
+    def path(self):
+        return self.name if self.parent is None else os.path.join(self.parent.path, self.name)
+
+
+class DiskScan:
+    """Walks a folder tree in a background thread; sizes add up toward the top as it goes, so the view can
+    show them growing. Stays on one filesystem and counts hard-linked files once."""
+
+    def __init__(self, path):
+        self.lock = threading.Lock()
+        self.seen = set()          # (dev, inode) of files with several hard links
+        self.running = 0
+        self.stopped = False
+        self.root = self.start(path)
+
+    def start(self, path, inside=None):
+        """Scan path; `inside` is an already scanned child of it (when going up past the first folder)."""
+        root = Usage(path, None, True)
+        if inside:
+            with self.lock:
+                inside.parent, inside.name = root, os.path.basename(inside.name)
+                root.children[inside.name] = inside
+                root.size = inside.size
+        with self.lock:
+            self.running += 1
+        threading.Thread(target=self.walk, args=(root, inside and inside.name), daemon=True).start()
+        return root
+
+    def add(self, node, size):
+        with self.lock:
+            while node:
+                node.size += size
+                node = node.parent
+
+    def walk(self, root, skip):
+        try:
+            dev = os.lstat(root.path).st_dev
+        except OSError:
+            dev = None
+        stack = [root]
+        while stack and not self.stopped:
+            node = stack.pop()
+            total = 0
+            try:
+                entries = list(os.scandir(node.path))
+            except OSError as e:
+                node.error, entries = e.strerror, []
+            for e in entries:
+                if node is root and e.name == skip:
+                    continue
+                try:
+                    st = e.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                folder = stat.S_ISDIR(st.st_mode)
+                child = Usage(e.name, node, folder)
+                size = st.st_blocks * 512
+                if st.st_nlink > 1 and not folder:
+                    if (st.st_dev, st.st_ino) in self.seen:
+                        size = 0
+                    self.seen.add((st.st_dev, st.st_ino))
+                child.size = size
+                total += size
+                node.children[e.name] = child
+                if folder:
+                    if st.st_dev == dev:
+                        stack.append(child)
+                    else:   # another filesystem mounted here: left out
+                        child.listed, child.error = True, "other filesystem"
+            node.listed = True
+            self.add(node, total)
+        with self.lock:
+            self.running -= 1
+
+    def stop(self):
+        self.stopped = True
+
+
+class SpaceView(Gtk.Box):
+    """`space`: the items of a folder, biggest first, each with a bar for the space it takes (see Pane.open_space)."""
+
+    def __init__(self, pane, path):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.pane = pane
+        self.get_style_context().add_class("magica-space")
+        self.scan = DiskScan(path)
+        self.here = self.scan.root
+        self.rows = {}             # name → row of the folder on show
+        bar = Gtk.Box(spacing=6, margin=6)
+        def button(icon, tip, action):
+            b = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.MENU)
+            b.set_relief(Gtk.ReliefStyle.NONE)
+            b.set_tooltip_text(tip)
+            b.set_can_focus(False)
+            b.connect("clicked", lambda *_: action())
+            return b
+        bar.pack_start(button("go-up-symbolic", "Up (Backspace)", self.go_up), False, False, 0)
+        self.title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.START)
+        self.title.get_style_context().add_class("magica-space-path")
+        bar.pack_start(self.title, True, True, 0)
+        self.summary = Gtk.Label(xalign=1)
+        self.summary.get_style_context().add_class("dim-label")
+        bar.pack_start(self.summary, False, False, 0)
+        bar.pack_start(button("utilities-terminal-symbolic", "cd here and close (C)", self.cd_here), False, False, 0)
+        bar.pack_start(button("window-close-symbolic", "Close (Esc)", pane.close_space), False, False, 0)
+        self.pack_start(bar, False, False, 0)
+        self.list = Gtk.ListBox(activate_on_single_click=True)
+        self.list.set_sort_func(lambda a, b: (b.size > a.size) - (b.size < a.size) if a.order == b.order
+                                else a.order - b.order)
+        self.list.connect("row-activated", self.on_row)
+        self.list.connect("button-press-event", self.on_press)
+        scroll = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.add(self.list)
+        self.pack_start(scroll, True, True, 0)
+        self.connect("key-press-event", self.on_key)
+        self.connect("destroy", lambda *_: self.scan.stop())
+        self.show_folder(self.here)
+        self._tick = GLib.timeout_add(250, self.on_tick)
+
+    def on_tick(self):
+        running = self.scan.running   # read first: the last refresh after the scan ends says so
+        self.refresh()
+        if running:
+            return True
+        self._tick = None
+        return False
+
+    def make_row(self, name, folder, order=1):
+        row = Gtk.ListBoxRow()
+        row.name, row.folder, row.order, row.size = name, folder, order, 0
+        box = Gtk.Box(spacing=10, margin_start=10, margin_end=12, margin_top=3, margin_bottom=3)
+        icon = Gtk.Image.new_from_icon_name("folder-symbolic" if folder else "text-x-generic-symbolic", Gtk.IconSize.MENU)
+        row.label = Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, width_chars=28, max_width_chars=28)
+        row.bar = Gtk.ProgressBar(hexpand=True, valign=Gtk.Align.CENTER)
+        row.amount = Gtk.Label(xalign=1, width_chars=9)
+        row.share = Gtk.Label(xalign=1, width_chars=5)
+        row.share.get_style_context().add_class("dim-label")
+        for w, expand in ((icon, False), (row.label, False), (row.bar, True), (row.amount, False), (row.share, False)):
+            box.pack_start(w, expand, expand, 0)
+        row.add(box)
+        row.show_all()
+        return row
+
+    def show_folder(self, node):
+        self.here = node
+        for row in self.list.get_children():
+            row.destroy()
+        self.rows = {}
+        if node.parent is not None or node.name != "/":
+            up = self.make_row("..", True, order=0)
+            up.bar.set_no_show_all(True)
+            up.bar.hide()
+            self.list.add(up)
+        self.refresh()
+        self.list.grab_focus()
+
+    def refresh(self):
+        node = self.here
+        items = sorted(list(node.children.values()), key=lambda c: -c.size)
+        shown, rest = items[:SPACE_ROWS], items[SPACE_ROWS:]
+        total, top = max(node.size, 1), max([c.size for c in shown] + [1])
+        wanted = {c.name for c in shown} | ({"…"} if rest else set())
+        for name in list(self.rows):
+            if name not in wanted:
+                self.rows.pop(name).destroy()
+        changed = False
+        for c in shown + ([None] if rest else []):
+            name = c.name if c else "…"
+            row = self.rows.get(name)
+            if row is None:
+                row = self.rows[name] = self.make_row(name, c is not None and c.children is not None, 1 if c else 2)
+                self.list.add(row)
+            size = c.size if c else sum(r.size for r in rest)
+            changed |= size != row.size
+            row.size = size
+            if not c:
+                row.label.set_text(f"{len(rest)} smaller items")
+            row.bar.set_fraction(size / top)
+            row.amount.set_text("…" if c and not c.listed else human_size(size))
+            row.share.set_text(f"{100 * size / total:.0f}%")
+            row.set_tooltip_text(c.error if c and c.error else None)
+        if changed:
+            self.list.invalidate_sort()
+        self.title.set_text(node.path.replace(os.path.expanduser("~"), "~", 1) if node.path.startswith(os.path.expanduser("~"))
+                            else node.path)
+        try:
+            fs = os.statvfs(node.path)
+            free = f" · {human_size(fs.f_bavail * fs.f_frsize)} free of {human_size(fs.f_blocks * fs.f_frsize)}"
+        except OSError:
+            free = ""
+        busy = "scanning… " if self.scan.running else ""
+        self.summary.set_text(f"{busy}{human_size(node.size)} in {len(items)} items{free}")
+
+    def enter(self, name):
+        if name == "..":
+            return self.go_up()
+        child = self.here.children.get(name)
+        if child is not None and child.children is not None and child.error != "other filesystem":
+            self.show_folder(child)
+
+    def go_up(self):
+        if self.here.parent is not None:
+            name = self.here.name
+            self.show_folder(self.here.parent)
+        elif self.here.name != "/":   # above where the scan started: scan the parent too (this folder is kept)
+            name = os.path.basename(self.here.name)
+            self.show_folder(self.scan.start(os.path.dirname(self.here.name), inside=self.here))
+            if self._tick is None:
+                self._tick = GLib.timeout_add(250, self.on_tick)
+        else:
+            return
+        row = self.rows.get(name)
+        if row:
+            self.list.select_row(row)
+            row.grab_focus()
+
+    def open_file(self, name):
+        child = self.here.children.get(name)
+        if child is not None and child.children is None:
+            try:
+                Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(child.path).get_uri(), None)
+            except GLib.Error:
+                pass
+
+    def on_row(self, _, row):
+        if row.folder:
+            self.enter(row.name)
+        else:   # files open with Enter (a single click only selects them; double-click: see on_press)
+            ev = Gtk.get_current_event()
+            if ev and ev.type == Gdk.EventType.KEY_PRESS:
+                self.open_file(row.name)
+
+    def on_press(self, _, event):
+        if event.type == Gdk.EventType._2BUTTON_PRESS:
+            row = self.list.get_row_at_y(int(event.y))
+            if row and not row.folder:
+                self.open_file(row.name)
+        return False
+
+    def cd_here(self):
+        path = self.here.path
+        self.pane.close_space()
+        self.pane.term.feed_child(f" cd -- {shlex.quote(path)}\n".encode())
+
+    def on_key(self, _, event):
+        state = event.state & Gtk.accelerator_get_default_mod_mask()
+        if event.keyval in (Gdk.KEY_Escape, Gdk.KEY_q, Gdk.KEY_Q) and not state:
+            self.pane.close_space()
+        elif event.keyval == Gdk.KEY_BackSpace or (state == Gdk.ModifierType.MOD1_MASK and event.keyval == Gdk.KEY_Up) \
+                or (not state and event.keyval == Gdk.KEY_Left):
+            self.go_up()
+        elif not state and event.keyval == Gdk.KEY_Right:
+            row = self.list.get_selected_row()
+            if row and row.folder:
+                self.enter(row.name)
+        elif not state and event.keyval in (Gdk.KEY_c, Gdk.KEY_C):
+            self.cd_here()
+        else:
+            return False
+        return True
+
+
 class Pane(Gtk.Overlay):
     """One terminal over a backdrop with its character's figure."""
 
@@ -1464,6 +1753,7 @@ class Pane(Gtk.Overlay):
         self.win = app_window
         self.game = None          # the `crush` game while it's open over this pane
         self.browser = None       # the `browser` page while it's open over this pane
+        self.space = None         # the `space` view while it's open over this pane
         t = THEMES[app_window.theme]
         self.theme = t
         self.focused = False
@@ -1630,6 +1920,33 @@ class Pane(Gtk.Overlay):
         self.queue_cover_check()
         self.term.grab_focus()
 
+    def open_space(self, path):
+        """`space`: what takes up the disk in a folder covers the terminal until Esc / q. She stays in front, translucent."""
+        if self.space:
+            self.close_space()
+        if not os.path.isdir(path):
+            return
+        self.space = SpaceView(self, path)
+        self.add_overlay(self.space)
+        self.reorder_overlay(self.space, 1)   # just above the terminal, under her figure
+        self.space.list.connect("focus-in-event", lambda *_: self.set_focused(True))
+        self.space.list.connect("focus-out-event", lambda *_: self.set_focused(False))
+        self.space.list.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
+        self.space.list.connect("motion-notify-event", self.on_motion)
+        self.space.connect("leave-notify-event", lambda *_: self.set_hovering(False))
+        self.space.show_all()
+        self.space.list.grab_focus()
+        self.queue_cover_check()
+
+    def close_space(self):
+        if not self.space:
+            return
+        self.space.destroy()
+        self.space = None
+        self.set_hovering(False)
+        self.queue_cover_check()
+        self.term.grab_focus()
+
     def close_game(self):
         if not self.game:
             return
@@ -1688,6 +2005,10 @@ class Pane(Gtk.Overlay):
         title = self.term.get_window_title() or ""
         if title == "magica:crush":   # `crush` (see ~/.bashrc): the game, in this pane
             GLib.idle_add(lambda: self.open_game() and False)
+            return
+        if title.startswith("magica:space:"):   # `space [folder]` (see ~/.bashrc)
+            path = title[len("magica:space:"):]
+            GLib.idle_add(lambda: self.open_space(path) and False)
             return
         if title.startswith("magica:browser:"):   # `browser [address or search]` (see ~/.bashrc)
             text = title[len("magica:browser:"):]
@@ -1763,12 +2084,9 @@ class Pane(Gtk.Overlay):
         self.frame_css.load_from_data(
             f".magica-frame {{ border: {FRAME_WIDTH}px solid {border}; background: {veil}; }}".encode())
 
-    def on_motion(self, widget, event):
-        pos = self.img.translate_coordinates(widget, 0, 0)
-        if pos:
-            x, y = pos
-            w, h = self.img.get_allocated_width(), self.img.get_allocated_height()
-            self.set_hovering(x <= event.x < x + w and y <= event.y < y + h)
+    def on_motion(self, *_):
+        x, y = self.img.get_pointer()   # relative to her figure, whichever widget the motion came from
+        self.set_hovering(0 <= x < self.img.get_allocated_width() and 0 <= y < self.img.get_allocated_height())
         return False
 
     def set_hovering(self, over):
@@ -1802,7 +2120,7 @@ class Pane(Gtk.Overlay):
     def check_cover(self):
         """Fade her if any cell behind her solid part shows text or a colour (vs. the theme background)."""
         self._cover_pending = False
-        covering = self.browser is not None   # a page is always "text behind her"
+        covering = self.browser is not None or self.space is not None   # a page / list is always "text behind her"
         pb, pos = self.img.get_pixbuf(), self.img.translate_coordinates(self.term, 0, 0)
         if pb and pos and self.img.get_visible() and not covering:
             spans = self.solid_spans(pb)
@@ -2022,6 +2340,14 @@ class Window(Gtk.ApplicationWindow):
             .magica-browser entry progress {{ border-bottom: 2px solid {accent}; background: none; }}
             .magica-browser button {{ color: {t['dim']}; }}
             .magica-browser button:hover {{ color: {t['fg']}; }}
+            .magica-space, .magica-space list {{ background: {t['bg']}; color: {t['fg']}; }}
+            .magica-space list row:hover {{ background: {mix(t['bg'], accent, 0.08)}; }}
+            .magica-space list row:selected {{ background: {mix(t['bg'], accent, 0.2)}; color: {t['fg']}; }}
+            .magica-space progressbar trough {{ background: {mix(t['bg'], t['dim'], 0.25)}; border: none; min-height: 8px; border-radius: 4px; }}
+            .magica-space progressbar progress {{ background: {accent}; border: none; min-height: 8px; border-radius: 4px; }}
+            .magica-space .magica-space-path {{ font-weight: bold; }}
+            .magica-space button {{ color: {t['dim']}; }}
+            .magica-space button:hover {{ color: {t['fg']}; }}
         """
         if css != getattr(self, "_css_text", None):     # reloaded on focus changes for the accent; skip if same
             self._css_text = css
@@ -2278,6 +2604,10 @@ class Window(Gtk.ApplicationWindow):
         key = Gdk.keyval_to_lower(event.keyval)
         browsing = self.active and self.active.browser and self.get_focus() and \
             self.get_focus().is_ancestor(self.active.browser)
+        if state == ctrl | shift and key == Gdk.KEY_w and self.active and self.active.space and self.get_focus() and \
+                self.get_focus().is_ancestor(self.active.space):   # closes the `space` view, not the pane
+            self.active.close_space()
+            return True
         if state == ctrl | shift and browsing and key in (Gdk.KEY_w, Gdk.KEY_c, Gdk.KEY_v, Gdk.KEY_f):
             if key == Gdk.KEY_w:   # closes the page, not the pane; copy / paste / find are the page's own
                 self.active.close_browser()

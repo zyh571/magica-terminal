@@ -32,6 +32,11 @@ if [ -n "$MAGICA_CHAR" ]; then
   crush() { printf '\033]0;magica:crush\007'; sleep 0.1; }   # (the sleep lets the terminal see the title before the prompt resets it)
   # `browser [address or search]`: a web page in this pane (✕ or Ctrl+Shift+W comes back to the prompt)
   browser() { printf '\033]0;magica:browser:%s\007' "$(printf '%s' "$*" | tr -d '\000-\037')"; sleep 0.1; }
+  # `space [folder]`: what takes up the disk there, in this pane (Esc / q comes back; C cds into the folder on show)
+  space() {
+    local d; d=$(cd -- "${1:-.}" 2>/dev/null && pwd -P) || { echo "space: no such folder: $1" >&2; return 1; }
+    printf '\033]0;magica:space:%s\007' "$d"; sleep 0.1
+  }
   # `kyubey`: this pane becomes Kyubey and runs a root shell in place; `exit` brings her back
   kyubey() {
     sudo -v || return            # ask for the password first; no switch (and no clear) if it fails
