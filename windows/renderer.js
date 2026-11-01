@@ -179,7 +179,7 @@ class Pane {
     this.cmdStart = null;
     this.stretch = 1; this.widen = 1; this.hopOffset = 0;   // breathing, squash, hops
     this.id = null;
-    this.game = null;   // the `crush` game while it's open over this pane
+    this.overlay = null;   // the `crush` game or `note` notepad while one is open over this pane
 
     this.el = el('div', 'pane');
     this.host = el('div', 'term-host');
@@ -267,6 +267,7 @@ class Pane {
     this.character = character;
     this.name = character[0];
     this.colour = this.win.theme === 'dark' ? character[1] : character[2];
+    this.el.style.setProperty('--pane', this.colour);
     this.img.src = figureUrl(this.name);
     this.tint.style.webkitMaskImage = this.tint.style.maskImage = `url("${figureUrl(this.name)}")`;
     if (this.term) this.applyTheme();
@@ -294,6 +295,7 @@ class Pane {
 
   applyTheme() {   // re-colour for the window's light/dark theme or a new character
     this.colour = this.win.theme === 'dark' ? this.character[1] : this.character[2];
+    this.el.style.setProperty('--pane', this.colour);   // her colour, for the notepad
     this.term.options.theme = this.xtermTheme();
     this.term.options.minimumContrastRatio = this.contrastRatio();
     if (this.colourReports && this.reportedTheme !== this.win.theme) this.reportColourScheme();
@@ -318,6 +320,7 @@ class Pane {
       this.fit.fit();
       if (this.id) magica.resize(this.id, this.term.cols, this.term.rows);
     }
+    this.overlay?.onResize?.();
     this.updateFigure();
   }
 
@@ -335,28 +338,36 @@ class Pane {
   }
 
   focus() {
-    if (this.game) this.game.el.focus();
+    if (this.overlay) this.overlay.focus();
     else if (this.opened) this.term.focus();
     else this.wantFocus = true;
   }
 
-  openGame() {   // `crush`: the game covers the terminal (the shell waits underneath) until Esc / q
-    if (this.game || this.closed) return;
-    this.game = new Crush(this);
-    this.host.after(this.game.el);   // just above the terminal, under the figure and search box
-    this.game.el.addEventListener('focus', () => this.setFocused(true));
-    this.game.el.addEventListener('blur', () => this.setFocused(false));
-    this.game.el.focus();
+  // `crush` / `note`: the game or the notepad covers the terminal (the shell waits underneath) until Esc.
+  // An overlay has el, focus(), destroy() (which saves) and optionally onResize().
+  openOverlay(make) {
+    if (this.closed) return;
+    if (this.overlay) this.closeOverlay(false);
+    this.overlay = make(this);
+    this.host.after(this.overlay.el);   // just above the terminal, under the figure and search box
+    this.overlay.el.addEventListener('focusin', () => this.setFocused(true));
+    this.overlay.el.addEventListener('focusout', () => this.setFocused(false));
+    this.overlay.focus();
     this.updateFigure();
+    this.win.updateOnTop();
   }
 
-  closeGame() {
-    if (!this.game) return;
-    this.game.saveBest();
-    this.game.destroy();
-    this.game = null;
+  openGame() { this.openOverlay(pane => new Crush(pane)); }
+
+  openNotes() { this.openOverlay(pane => new Notes(pane)); }
+
+  closeOverlay(refocus = true) {
+    if (!this.overlay) return;
+    this.overlay.destroy();
+    this.overlay = null;
     this.updateFigure();
-    this.focus();
+    this.win.updateOnTop();
+    if (refocus) this.focus();
   }
 
   setFocused(focused) {
@@ -403,6 +414,8 @@ class Pane {
       if (LAYOUTS[name]) setTimeout(() => this.win.applyLayout(this, name));
     } else if (data === 'magica:crush') {   // `crush`: the game, in this pane
       setTimeout(() => this.openGame());
+    } else if (data === 'magica:note') {   // `note`: the notepad
+      setTimeout(() => this.openNotes());
     }
     return true;
   }
@@ -454,7 +467,7 @@ class Pane {
     const wait = IDLE_EVERY[0] + Math.random() * (IDLE_EVERY[1] - IDLE_EVERY[0]);
     this._idleTimer = setTimeout(() => {
       if (this.closed) return;
-      if (now() - this.lastActivity >= IDLE_AFTER && this.el.offsetParent && !this.hovering && !this.game && !this.hopping
+      if (now() - this.lastActivity >= IDLE_AFTER && this.el.offsetParent && !this.hovering && !this.overlay && !this.hopping
           && !this.breathing) {
         Math.random() < 0.5 ? this.hop(IDLE_BOB, 2) : this.breathe();
       }
@@ -471,8 +484,8 @@ class Pane {
   updateFigure() {
     const w = this.el.clientWidth, h = this.el.clientHeight;
     if (w <= 1 || h <= 1) return;
-    this.fig.style.visibility = this.game ? 'hidden' : '';   // no figure or bar while the game is open
-    if (this.game) { this.base.style.display = 'none'; return; }
+    this.fig.style.visibility = this.overlay ? 'hidden' : '';   // no figure or bar over the game / notepad
+    if (this.overlay) { this.base.style.display = 'none'; return; }
     const s = Math.max(w / 1920, h / 1080);
     const fh = Math.max(1, Math.round(FIG_HEIGHT * s));
     const ratio = this.img.naturalHeight ? this.img.naturalWidth / this.img.naturalHeight : 0.5;
@@ -548,7 +561,7 @@ class Pane {
   close() {
     this.closed = true;
     clearTimeout(this._idleTimer);
-    if (this.game) { this.game.saveBest(); this.game.destroy(); }
+    if (this.overlay) { this.overlay.destroy(); this.overlay = null; this.win.updateOnTop(); }
     if (this.id) { magica.kill(this.id); panesById.delete(this.id); }
     this.term.dispose();
   }
@@ -617,7 +630,7 @@ class Tab {
 
 
 class MagicaWindow {
-  constructor({ theme, session, command, crush, mica }) {
+  constructor({ theme, session, command, crush, note, mica }) {
     this.theme = theme;
     this.mica = mica && GLASS < 1;
     this.palette = palette(theme);
@@ -641,6 +654,12 @@ class MagicaWindow {
     magica.onSessionRequest(() => this.serialize());
     if (!(session && this.restore(session))) this.newTab({ argv: command });
     if (crush) this.current.panes()[0].openGame();   // `--crush`: the game in the first pane (for trying it out)
+    if (note) this.current.panes()[0].openNotes();   // `--note`: the notepad in the first pane
+  }
+
+  updateOnTop() {   // the window stays above the others while any pane has the notepad open
+    const on = this.allPanes().some(p => !p.closed && p.overlay instanceof Notes);
+    if (on !== this.onTop) magica.setOnTop(this.onTop = on);
   }
 
   nextCharacter() {

@@ -550,7 +550,10 @@ class Crush {
     this.frame = requestAnimationFrame(() => this.onTick());
   }
 
+  focus() { this.el.focus(); }
+
   destroy() {
+    this.saveBest();
     this.destroyed = true;
     cancelAnimationFrame(this.frame);
     this.el.remove();
@@ -637,7 +640,7 @@ class Crush {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'Escape' || e.key === 'q' || e.key === 'Q') {
       e.preventDefault();
-      this.pane.closeGame();
+      this.pane.closeOverlay();
     } else if (e.key === 'a' || e.key === 'A') {
       e.preventDefault();
       this.toggleAutoplay();

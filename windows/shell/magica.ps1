@@ -3,8 +3,8 @@
 #
 # Like shell/magica.bash: the pane's character replaces the user in the prompt and the "device" is always magica.
 # Typing a character's name (madoka, homura, sayaka, mami, kyoko) switches this pane to her (and clears it, if it actually
-# changed); `pair` / `magica` lay out the tab; `crush` opens Magica Crush over the pane; `kyubey` opens an elevated shell
-# as Kyubey (Windows sudo) until you exit it.
+# changed); `pair` / `magica` lay out the tab; `crush` opens Magica Crush over the pane; `note` opens the notepad over
+# it; `kyubey` opens an elevated shell as Kyubey (Windows sudo) until you exit it.
 if (-not $env:MAGICA_CHAR) { return }
 
 $global:_MagicaScript = $PSCommandPath
@@ -84,6 +84,23 @@ foreach ($l in 'pair', 'magica') {
 Remove-Variable c, l
 # `crush`: a match-3 game with the soul gems, in this pane (Esc / q comes back to the prompt)
 function global:crush { _MagicaOsc 'magica:crush' }
+
+# `note`: the notepad, in this pane (Esc comes back to the prompt). `note buy milk` adds "buy milk" as a line at the
+# end of it without opening it. The note is a plain-text file, %APPDATA%\magica-terminal\note.txt.
+function global:note {
+    if (-not $args.Count) { _MagicaOsc 'magica:note'; return }
+    $dir = Join-Path $env:APPDATA 'magica-terminal'
+    [void][IO.Directory]::CreateDirectory($dir)
+    $file = Join-Path $dir 'note.txt'
+    $line = ($args -join ' ') + "`n"
+    if ([IO.File]::Exists($file)) {
+        $old = [IO.File]::ReadAllText($file)
+        if ($old -and -not $old.EndsWith("`n")) { $line = "`n" + $line }
+    }
+    [IO.File]::AppendAllText($file, $line)   # UTF-8, no BOM
+    $e = $global:_MagicaEsc
+    Write-Host "$e[38;5;$($global:_MagicaSlots[$env:MAGICA_CHAR])mnoted$e[0m"
+}
 
 # `kyubey`: this pane becomes Kyubey and runs an elevated shell in place; `exit` brings her back.
 # Needs Windows' sudo set to run inline (Settings > System > Advanced > Enable sudo).

@@ -11,6 +11,7 @@ const THEME_FILE = path.join(CONFIG, 'theme');          // "light", "dark" or "s
 const SESSION_FILE = path.join(CONFIG, 'session.json'); // tabs / splits saved on close
 const SETTINGS_FILE = path.join(CONFIG, 'settings.json'); // overrides renderer.js settings (see there)
 const CRUSH_FILE = path.join(CONFIG, 'crush.json');     // Magica Crush's best score
+const NOTE_FILE = path.join(CONFIG, 'note.txt');        // `note`: the notepad (plain text)
 const INTEGRATION = path.join(__dirname, 'shell', 'magica.ps1');
 const APP_ID = 'dev.local.MagicaTerminal';
 const HOTKEY = 'CTRL+ALT+T';   // opens a new window from anywhere (Start Menu shortcut key; '' = none)
@@ -55,8 +56,10 @@ if (process.argv.includes('--install-shortcut')) {
 }
 
 // `magica-terminal CMD ARGS…` or `-e CMD ARGS…` runs CMD in the first pane
-// (skipping Chromium / Node switches and, when run as `electron .`, the app folder); `--crush` opens the game in it
+// (skipping Chromium / Node switches and, when run as `electron .`, the app folder); `--crush` / `--note` open the
+// game / notepad in it
 const crush = process.argv.includes('--crush');
+const note = process.argv.includes('--note');
 let command = process.argv.slice(1);
 const skip = a => /^--[\w-]+(=|$)/.test(a) || (!app.isPackaged && path.resolve(a) === __dirname);
 while (command.length && skip(command[0])) command.shift();
@@ -126,7 +129,7 @@ ipcMain.handle('init', () => {
   if (firstInstance && !command) {
     try { session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); } catch {}
   }
-  return { theme: readTheme(), session, command, crush, mica: useMica() };   // mica: make the page's backgrounds translucent
+  return { theme: readTheme(), session, command, crush, note, mica: useMica() };   // mica: make the page's backgrounds translucent
 });
 function readSettings() {
   let settings = {};
@@ -149,6 +152,20 @@ ipcMain.handle('crush:best', () => crushBest());
 ipcMain.on('crush:save', (_, best) => {   // only ever goes up (several panes can have a game open)
   if (Number.isInteger(best) && best > crushBest()) writeFile(CRUSH_FILE, JSON.stringify({ best }));
 });
+// `note`: the notepad's one note
+ipcMain.handle('note:read', () => {
+  try { return fs.readFileSync(NOTE_FILE, 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n'); } catch { return ''; }
+});
+ipcMain.handle('note:write', (_, text) => {
+  if (typeof text !== 'string') return false;
+  try {
+    fs.mkdirSync(CONFIG, { recursive: true });
+    fs.writeFileSync(NOTE_FILE, text);
+    return true;
+  } catch { return false; }
+});
+// the notepad keeps its window above the others while it's open, so a small window doesn't vanish behind the browser
+ipcMain.on('window:on-top', (e, on) => BrowserWindow.fromWebContents(e.sender)?.setAlwaysOnTop(!!on));
 ipcMain.handle('clipboard:read', () => clipboard.readText());
 ipcMain.on('clipboard:write', (_, text) => clipboard.writeText(text));
 ipcMain.handle('path:resolve', (_, p, cwd) => {

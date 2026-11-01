@@ -29,6 +29,10 @@ else (without the shell integration). `shell/magica.ps1` is dot-sourced after yo
 - `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character. `pair` and `magica` lay out the tab.
 - `crush` opens Magica Crush over the pane, as on Linux (`crush.js`; rules and keys in the main README). Esc or q goes
   back to the prompt. `npm start -- --crush` opens a window with the game in its first pane.
+- `note` opens the notepad over the pane (`notes.js`): one plain sheet in the theme and the pane's colour. It saves as
+  you type and Esc goes back to the prompt. While it's open the window stays on top of other windows, so a small
+  window works as a sticky note. `note buy milk` adds a line to it without opening it. The note is a plain-text file,
+  `%APPDATA%\magica-terminal\note.txt`. `npm start -- --note` opens a window with the notepad in its first pane.
 - `kyubey` opens an elevated shell as Kyubey through Windows' own `sudo`. Turn it on in Settings > System > Advanced >
   Enable sudo, and set it to **Inline** so it runs inside the pane.
 
