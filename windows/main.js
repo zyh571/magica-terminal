@@ -74,11 +74,23 @@ function readTheme() {
   return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
 }
 
+// Writes a whole file so a crash or power cut mid-save leaves either the old contents or the new, never half: write a
+// temporary file next to it, flush it to disk, then rename it over the original. Returns whether it worked.
 function writeFile(file, text) {
+  const tmp = file + '.tmp';
   try {
     fs.mkdirSync(CONFIG, { recursive: true });
-    fs.writeFileSync(file, text);
-  } catch {}
+    const fd = fs.openSync(tmp, 'w');
+    try {
+      fs.writeFileSync(fd, text);
+      fs.fsyncSync(fd);
+    } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, file);
+    return true;
+  } catch {
+    try { fs.unlinkSync(tmp); } catch {}
+    return false;
+  }
 }
 
 // ── shells ──
@@ -158,11 +170,7 @@ ipcMain.handle('note:read', () => {
 });
 ipcMain.handle('note:write', (_, text) => {
   if (typeof text !== 'string') return false;
-  try {
-    fs.mkdirSync(CONFIG, { recursive: true });
-    fs.writeFileSync(NOTE_FILE, text);
-    return true;
-  } catch { return false; }
+  return writeFile(NOTE_FILE, text);
 });
 // the notepad keeps its window above the others while it's open, so a small window doesn't vanish behind the browser
 ipcMain.on('window:on-top', (e, on) => BrowserWindow.fromWebContents(e.sender)?.setAlwaysOnTop(!!on));
