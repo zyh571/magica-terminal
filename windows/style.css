@@ -33,6 +33,10 @@ body.multi-tab #tabs { display: flex; }
                 -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
 .base { position: absolute; pointer-events: none; z-index: 5; border-radius: 99px; }
 
+/* `crush`: the game over the terminal, its small canvas scaled up with square pixels (crush.js) */
+.crush { position: absolute; inset: 0; z-index: 4; outline: none; user-select: none; }
+.crush canvas { position: absolute; image-rendering: pixelated; }
+
 .search { position: absolute; top: 8px; right: 8px; z-index: 20; width: 220px; padding: 5px 8px; display: none;
           background: var(--bg); color: var(--fg); border: 1px solid var(--accent); border-radius: 6px;
           font: 13px "Segoe UI", sans-serif; outline: none; }

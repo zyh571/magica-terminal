@@ -10,6 +10,7 @@ const CONFIG = path.join(app.getPath('appData'), 'magica-terminal');
 const THEME_FILE = path.join(CONFIG, 'theme');          // "light", "dark" or "system"
 const SESSION_FILE = path.join(CONFIG, 'session.json'); // tabs / splits saved on close
 const SETTINGS_FILE = path.join(CONFIG, 'settings.json'); // overrides renderer.js settings (see there)
+const CRUSH_FILE = path.join(CONFIG, 'crush.json');     // Magica Crush's best score
 const INTEGRATION = path.join(__dirname, 'shell', 'magica.ps1');
 const APP_ID = 'dev.local.MagicaTerminal';
 const HOTKEY = 'CTRL+ALT+T';   // opens a new window from anywhere (Start Menu shortcut key; '' = none)
@@ -54,7 +55,8 @@ if (process.argv.includes('--install-shortcut')) {
 }
 
 // `magica-terminal CMD ARGS…` or `-e CMD ARGS…` runs CMD in the first pane
-// (skipping Chromium / Node switches and, when run as `electron .`, the app folder)
+// (skipping Chromium / Node switches and, when run as `electron .`, the app folder); `--crush` opens the game in it
+const crush = process.argv.includes('--crush');
 let command = process.argv.slice(1);
 const skip = a => /^--[\w-]+(=|$)/.test(a) || (!app.isPackaged && path.resolve(a) === __dirname);
 while (command.length && skip(command[0])) command.shift();
@@ -124,7 +126,7 @@ ipcMain.handle('init', () => {
   if (firstInstance && !command) {
     try { session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); } catch {}
   }
-  return { theme: readTheme(), session, command };
+  return { theme: readTheme(), session, command, crush };
 });
 ipcMain.on('settings', e => {   // synchronous: renderer.js needs them before its first line runs
   let settings = {};
@@ -136,6 +138,13 @@ ipcMain.on('settings', e => {   // synchronous: renderer.js needs them before it
   e.returnValue = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
 });
 ipcMain.on('theme:save', (_, name) => writeFile(THEME_FILE, name + '\n'));
+function crushBest() {
+  try { return Math.max(0, parseInt(JSON.parse(fs.readFileSync(CRUSH_FILE, 'utf8')).best, 10) || 0); } catch { return 0; }
+}
+ipcMain.handle('crush:best', () => crushBest());
+ipcMain.on('crush:save', (_, best) => {   // only ever goes up (several panes can have a game open)
+  if (Number.isInteger(best) && best > crushBest()) writeFile(CRUSH_FILE, JSON.stringify({ best }));
+});
 ipcMain.handle('clipboard:read', () => clipboard.readText());
 ipcMain.on('clipboard:write', (_, text) => clipboard.writeText(text));
 ipcMain.handle('path:resolve', (_, p, cwd) => {

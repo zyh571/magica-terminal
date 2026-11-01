@@ -7,7 +7,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "shortcut": "electron . --install-shortcut"
+    "shortcut": "electron . --install-shortcut",
+    "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",

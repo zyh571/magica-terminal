@@ -3,7 +3,8 @@
 #
 # Like shell/magica.bash: the pane's character replaces the user in the prompt and the "device" is always magica.
 # Typing a character's name (madoka, homura, sayaka, mami, kyoko) switches this pane to her (and clears it, if it actually
-# changed); `pair` / `magica` lay out the tab; `kyubey` opens an elevated shell as Kyubey (Windows sudo) until you exit it.
+# changed); `pair` / `magica` lay out the tab; `crush` opens Magica Crush over the pane; `kyubey` opens an elevated shell
+# as Kyubey (Windows sudo) until you exit it.
 if (-not $env:MAGICA_CHAR) { return }
 
 $global:_MagicaScript = $PSCommandPath
@@ -82,6 +83,8 @@ foreach ($l in 'pair', 'magica') {
         "`$env:MAGICA_CHAR = 'madoka'; _MagicaColours; _MagicaOsc 'magica:layout:$l'; Start-Sleep -Milliseconds 100; Clear-Host"))
 }
 Remove-Variable c, l
+# `crush`: a match-3 game with the soul gems, in this pane (Esc / q comes back to the prompt)
+function global:crush { _MagicaOsc 'magica:crush' }
 
 # `kyubey`: this pane becomes Kyubey and runs an elevated shell in place; `exit` brings her back.
 # Needs Windows' sudo set to run inline (Settings > System > Advanced > Enable sudo).

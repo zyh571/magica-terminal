@@ -27,6 +27,8 @@ else (without the shell integration). `shell/magica.ps1` is dot-sourced after yo
 (OSC 666) and the current folder (OSC 9;9) to the terminal.
 
 - `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character. `pair` and `magica` lay out the tab.
+- `crush` opens Magica Crush over the pane, as on Linux (`crush.js`; rules and keys in the main README). Esc or q goes
+  back to the prompt. `npm start -- --crush` opens a window with the game in its first pane.
 - `kyubey` opens an elevated shell as Kyubey through Windows' own `sudo`. Turn it on in Settings > System > Advanced >
   Enable sudo, and set it to **Inline** so it runs inside the pane.
 
@@ -34,7 +36,9 @@ else (without the shell integration). `shell/magica.ps1` is dot-sourced after yo
 
 - Settings are the constants at the top of `renderer.js`; those wrapped in `setting()` can be overridden in
   `%APPDATA%\magica-terminal\settings.json` by their lower-case names. The shell, config folder and window live in `main.js`.
-- Config and session are in `%APPDATA%\magica-terminal\`.
+- Config and session are in `%APPDATA%\magica-terminal\`, Magica Crush's best score in `crush.json` there.
+- `--crush` always opens a new window; inside a pane, type `crush` instead.
+- The game's rules are tested with `npm test` (`test/crush.test.js`, the same cases as `../tests/test_crush.py`).
 - Ctrl+click opens URLs, OSC 8 links and Windows paths (`C:\…`, `~\…`) that exist.
 - Ctrl+C in PowerShell ends a native program with `STATUS_CONTROL_C_EXIT`, which doesn't count as a failure (like 130
   on Linux).

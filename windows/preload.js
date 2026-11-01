@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('magica', {
   onData: fn => ipcRenderer.on('pty:data', (_, id, data) => fn(id, data)),
   onExit: fn => ipcRenderer.on('pty:exit', (_, id, code) => fn(id, code)),
   saveTheme: name => ipcRenderer.send('theme:save', name),
+  crushBest: () => ipcRenderer.invoke('crush:best'),
+  saveCrushBest: best => ipcRenderer.send('crush:save', best),
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   writeClipboard: text => ipcRenderer.send('clipboard:write', text),
   resolvePath: (p, cwd) => ipcRenderer.invoke('path:resolve', p, cwd),

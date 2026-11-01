@@ -41,6 +41,14 @@ const NOTIFY = setting('NOTIFY', true);          // …and a notification when t
 const IDLE_AFTER = setting('IDLE_AFTER', 15);        // s without output or typing before she starts idling (0 = off)
 const IDLE_EVERY = setting('IDLE_EVERY', [6, 14]);   // s between idle moves (random in this range)
 const IDLE_BOB = setting('IDLE_BOB', 12), IDLE_BREATH = setting('IDLE_BREATH', 0.04);
+const CRUSH_SIZE = setting('CRUSH_SIZE', 8);            // `crush` (crush.js): board size (cells per side)
+const CRUSH_SPEED = setting('CRUSH_SPEED', 1.0);        // …animation speed (2 = twice as fast)
+const CRUSH_HINT_AFTER = setting('CRUSH_HINT_AFTER', 5);   // …s without a move before a hint wiggles
+const CRUSH_AUTOPLAY = setting('CRUSH_AUTOPLAY', false);   // …start with autoplay on (A toggles it in the game)
+const CRUSH_AUTOPLAY_DELAY = setting('CRUSH_AUTOPLAY_DELAY', 0.6);   // …s autoplay waits between moves
+const CRUSH_CHAIN_LUCK = setting('CRUSH_CHAIN_LUCK', 0.4);   // …chance a head dropping in during a chain copies a neighbour (so chains keep going)
+const CRUSH_LUCKY_STRIPES = setting('CRUSH_LUCKY_STRIPES', 0.05);   // …chance it drops in already striped
+const CRUSH_CHAIN_FADE = setting('CRUSH_CHAIN_FADE', 0.72);   // …both shrink this much per chain step, so chains still end
 
 // hot commands typed in the shell: equal splits, "h" = side by side, "v" = stacked
 const LAYOUTS = {
@@ -164,6 +172,7 @@ class Pane {
     this.cmdStart = null;
     this.stretch = 1; this.widen = 1; this.hopOffset = 0;   // breathing, squash, hops
     this.id = null;
+    this.game = null;   // the `crush` game while it's open over this pane
 
     this.el = el('div', 'pane');
     this.host = el('div', 'term-host');
@@ -291,7 +300,7 @@ class Pane {
       this.term.textarea.addEventListener('blur', () => this.setFocused(false));
       this.fit.fit();
       this.spawn();
-      if (this.wantFocus) this.term.focus();
+      if (this.wantFocus) this.focus();   // (the game, if `--crush` opened it before the terminal had a size)
     } else {
       this.fit.fit();
       if (this.id) magica.resize(this.id, this.term.cols, this.term.rows);
@@ -313,8 +322,28 @@ class Pane {
   }
 
   focus() {
-    if (this.opened) this.term.focus();
+    if (this.game) this.game.el.focus();
+    else if (this.opened) this.term.focus();
     else this.wantFocus = true;
+  }
+
+  openGame() {   // `crush`: the game covers the terminal (the shell waits underneath) until Esc / q
+    if (this.game || this.closed) return;
+    this.game = new Crush(this);
+    this.host.after(this.game.el);   // just above the terminal, under the figure and search box
+    this.game.el.addEventListener('focus', () => this.setFocused(true));
+    this.game.el.addEventListener('blur', () => this.setFocused(false));
+    this.game.el.focus();
+    this.updateFigure();
+  }
+
+  closeGame() {
+    if (!this.game) return;
+    this.game.saveBest();
+    this.game.destroy();
+    this.game = null;
+    this.updateFigure();
+    this.focus();
   }
 
   setFocused(focused) {
@@ -359,6 +388,8 @@ class Pane {
     } else if (data.startsWith('magica:layout:')) {   // `pair` / `magica`; the shell already became Madoka
       const name = data.slice('magica:layout:'.length).trim();
       if (LAYOUTS[name]) setTimeout(() => this.win.applyLayout(this, name));
+    } else if (data === 'magica:crush') {   // `crush`: the game, in this pane
+      setTimeout(() => this.openGame());
     }
     return true;
   }
@@ -410,7 +441,8 @@ class Pane {
     const wait = IDLE_EVERY[0] + Math.random() * (IDLE_EVERY[1] - IDLE_EVERY[0]);
     this._idleTimer = setTimeout(() => {
       if (this.closed) return;
-      if (now() - this.lastActivity >= IDLE_AFTER && this.el.offsetParent && !this.hovering && !this.hopping && !this.breathing) {
+      if (now() - this.lastActivity >= IDLE_AFTER && this.el.offsetParent && !this.hovering && !this.game && !this.hopping
+          && !this.breathing) {
         Math.random() < 0.5 ? this.hop(IDLE_BOB, 2) : this.breathe();
       }
       this.scheduleIdle();
@@ -426,6 +458,8 @@ class Pane {
   updateFigure() {
     const w = this.el.clientWidth, h = this.el.clientHeight;
     if (w <= 1 || h <= 1) return;
+    this.fig.style.visibility = this.game ? 'hidden' : '';   // no figure or bar while the game is open
+    if (this.game) { this.base.style.display = 'none'; return; }
     const s = Math.max(w / 1920, h / 1080);
     const fh = Math.max(1, Math.round(FIG_HEIGHT * s));
     const ratio = this.img.naturalHeight ? this.img.naturalWidth / this.img.naturalHeight : 0.5;
@@ -501,6 +535,7 @@ class Pane {
   close() {
     this.closed = true;
     clearTimeout(this._idleTimer);
+    if (this.game) { this.game.saveBest(); this.game.destroy(); }
     if (this.id) { magica.kill(this.id); panesById.delete(this.id); }
     this.term.dispose();
   }
@@ -569,7 +604,7 @@ class Tab {
 
 
 class MagicaWindow {
-  constructor({ theme, session, command }) {
+  constructor({ theme, session, command, crush }) {
     this.theme = theme;
     this.palette = palette(theme);
     this.charIndex = 0;   // every window starts with Madoka, then rotates
@@ -588,6 +623,7 @@ class MagicaWindow {
     addEventListener('focus', () => this.active?.updateFigure());
     magica.onSessionRequest(() => this.serialize());
     if (!(session && this.restore(session))) this.newTab({ argv: command });
+    if (crush) this.current.panes()[0].openGame();   // `--crush`: the game in the first pane (for trying it out)
   }
 
   nextCharacter() {
