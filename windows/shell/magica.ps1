@@ -43,8 +43,7 @@ function global:prompt {
     $path = "$loc"
     if ($loc.Provider.Name -eq 'FileSystem') {
         [Console]::Write("$e]9;9;`"$($loc.ProviderPath)`"$e\")   # current folder, for new splits/tabs and the session
-        if ($path.StartsWith($HOME, [StringComparison]::OrdinalIgnoreCase)) { $path = '~' + $path.Substring($HOME.Length) }
-    }
+    }   # the prompt shows the full path (no ~ for the home folder)
     [Console]::Write("$e]0;$char@magica: $path$([char]7)")   # window title
     $mark = if ($global:_MagicaAdmin) { "$e[1;38;5;${r}m#" } else { '>' }
     $at = if ($char -eq 'kyubey') { "$e[1;38;5;${r}m@magica" } else { '@magica' }
