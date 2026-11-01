@@ -22,6 +22,9 @@ function setting(name, value) {
 const FONT_FAMILY = setting('FONT_FAMILY', '"Cascadia Mono", Consolas, "Courier New", monospace');
 const FONT_SIZE = setting('FONT_SIZE', 15);     // px
 const PADDING = 10;       // px around the text (style.css .term-host)
+// on the light theme, text lighter than this contrast ratio against the background is darkened until it reaches it
+// (programs set to a dark theme print white; 1 = off). Kept on dark too would wash out the dim greys, so light only.
+const LIGHT_CONTRAST = setting('LIGHT_CONTRAST', 4.5);
 
 // Figure size, as at full screen (1920x1080): a pane keeps the full-screen size while either its width or height is
 // still full, and shrinks once both shrink.
@@ -191,6 +194,7 @@ class Pane {
     this.term = new Terminal({
       fontFamily: FONT_FAMILY, fontSize: Math.round(FONT_SIZE * win.fontScale), allowTransparency: true,
       allowProposedApi: true, scrollback: 10000, cursorBlink: false, theme: this.xtermTheme(),
+      minimumContrastRatio: this.contrastRatio(),
       linkHandler: { activate: (e, uri) => e.ctrlKey && magica.open(uri) },   // OSC 8 hyperlinks
     });
     this.fit = new FitAddon.FitAddon();
@@ -266,7 +270,8 @@ class Pane {
   xtermTheme() {
     const t = THEMES[this.win.theme], pal = this.win.palette;
     const theme = {
-      foreground: t.fg, background: '#00000000', cursor: this.colour, cursorAccent: t.bg,
+      // transparent (for the figure), but still the theme's colour: minimumContrastRatio measures against it
+      foreground: t.fg, background: t.bg + '00', cursor: this.colour, cursorAccent: t.bg,
       selectionBackground: this.colour, selectionInactiveBackground: this.colour, selectionForeground: t.selFg,
       extendedAnsi: pal.slice(16),
       scrollbarSliderBackground: t.dim + '55', scrollbarSliderHoverBackground: t.dim + '99',
@@ -276,6 +281,8 @@ class Pane {
     return theme;
   }
 
+  contrastRatio() { return this.win.theme === 'light' ? LIGHT_CONTRAST : 1; }
+
   reply(data) { if (this.id) magica.write(this.id, data); }
 
   reportColourScheme() { this.reply(`\x1b[?997;${this.win.theme === 'dark' ? 1 : 2}n`); }
@@ -283,6 +290,7 @@ class Pane {
   applyTheme() {   // re-colour for the window's light/dark theme or a new character
     this.colour = this.win.theme === 'dark' ? this.character[1] : this.character[2];
     this.term.options.theme = this.xtermTheme();
+    this.term.options.minimumContrastRatio = this.contrastRatio();
     if (this.colourReports && this.reportedTheme !== this.win.theme) this.reportColourScheme();
     this.reportedTheme = this.win.theme;
     this.search.style.borderColor = this.colour;
