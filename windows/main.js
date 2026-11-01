@@ -126,18 +126,22 @@ ipcMain.handle('init', () => {
   if (firstInstance && !command) {
     try { session = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')); } catch {}
   }
-  return { theme: readTheme(), session, command, crush };
+  return { theme: readTheme(), session, command, crush, mica: useMica() };   // mica: make the page's backgrounds translucent
 });
-ipcMain.on('settings', e => {   // synchronous: renderer.js needs them before its first line runs
+function readSettings() {
   let settings = {};
   try {
     settings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
   } catch (err) {
     if (err.code !== 'ENOENT') console.warn(`${SETTINGS_FILE}: ignored (${err.message})`);
   }
-  e.returnValue = settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+  return settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+}
+ipcMain.on('settings', e => { e.returnValue = readSettings(); });   // synchronous: renderer.js needs them before its first line runs
+ipcMain.on('theme:save', (_, name) => {
+  writeFile(THEME_FILE, name + '\n');
+  for (const w of BrowserWindow.getAllWindows()) applyWindowTheme(w, name);
 });
-ipcMain.on('theme:save', (_, name) => writeFile(THEME_FILE, name + '\n'));
 function crushBest() {
   try { return Math.max(0, parseInt(JSON.parse(fs.readFileSync(CRUSH_FILE, 'utf8')).best, 10) || 0); } catch { return 0; }
 }
@@ -171,17 +175,36 @@ ipcMain.on('quit-empty', e => {
   BrowserWindow.fromWebContents(e.sender)?.destroy();
 });
 
+// The title bar is drawn by the page (index.html #titlebar); Windows still draws the minimise / maximise / close
+// buttons over its right end (so Snap Layouts work), in the theme's colours. With mica (Windows 11), the desktop
+// shows faintly through the window: the page's backgrounds are translucent (GLASS in renderer.js).
+const TITLEBAR_HEIGHT = 36;   // px, = #titlebar's height in style.css
+const SYMBOLS = { dark: '#e9dfcc', light: '#4a3f36' };   // button glyphs: the themes' text colours
+const BACKGROUNDS = { dark: '#24201c', light: '#f6efe1' };
+const useMica = () => readSettings().mica !== false && process.platform === 'win32'
+  && parseInt(os.release().split('.')[2], 10) >= 22000;   // Windows 11
+
+function applyWindowTheme(win, theme) {
+  nativeTheme.themeSource = theme;   // mica's own tint follows the app's light / dark, not Windows'
+  try { win.setTitleBarOverlay({ color: '#00000000', symbolColor: SYMBOLS[theme], height: TITLEBAR_HEIGHT }); } catch {}
+}
+
 function createWindow() {
   const theme = readTheme();
+  const mica = useMica();
   let [width, height] = [1100, 700];
   try {
     if (firstInstance && !command) [width, height] = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')).size;
   } catch {}
   const win = new BrowserWindow({
     width, height, title: 'Magica Terminal', show: false,
-    backgroundColor: theme === 'dark' ? '#1d1d1c' : '#e9e8e4',
+    backgroundColor: mica ? '#00000000' : BACKGROUNDS[theme],
+    backgroundMaterial: mica ? 'mica' : undefined,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#00000000', symbolColor: SYMBOLS[theme], height: TITLEBAR_HEIGHT },
     webPreferences: { preload: path.join(__dirname, 'preload.js') },
   });
+  nativeTheme.themeSource = theme;
   win.once('ready-to-show', () => win.show());
   win.on('focus', () => win.flashFrame(false));
   // closing the window saves its tabs, splits, characters and folders

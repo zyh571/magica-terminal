@@ -64,6 +64,10 @@ const TEXT_SATURATION = setting('TEXT_SATURATION', 0.55);   // her colour at thi
 const PATH_SATURATION = setting('PATH_SATURATION', 0.4);
 const CHAR_SLOTS = 100;         // palette slots 100…117: per character name / text / path colours, 118: red accent
 const RED_SLOT = 118;
+// Windows 11 mica: the desktop shows faintly through the window. GLASS is how opaque the backgrounds stay over it
+// (1 = solid); "mica": false in settings.json turns it off (main.js reads that one).
+const GLASS = setting('GLASS', 0.8);
+setting('MICA', true);
 const FOCUS_TINT = setting('FOCUS_TINT', 0.08);        // focused pane background: this much of her colour mixed in (when a tab has several panes)
 
 // [name, colour on dark, colour on light]
@@ -83,13 +87,13 @@ const ALL_CHARACTERS = [...CHARACTERS, KYUBEY];
 
 for (const key of Object.keys(magica.settings)) if (!usedSettings.has(key)) console.warn(`settings.json: unknown setting "${key}"`);
 
-const THEMES = {   // Tiro Finale palettes
-  dark: { bg: '#1d1d1c', fg: '#d4d2cc', dim: '#7f7d78', selFg: '#1b1a1f', palette: [
-    '#2b2b2a', '#c46a5e', '#8fa874', '#c9a54a', '#7f9bb8', '#b08aa8', '#7fada6', '#bdbbb5',
-    '#6b6a66', '#d98275', '#a5bd8a', '#e0bd5e', '#98b2cc', '#c6a0bd', '#95c2bb', '#ecebe7'] },
-  light: { bg: '#e9e8e4', fg: '#3a3a3a', dim: '#9a9893', selFg: '#f6f5f2', palette: [
-    '#2e2e2e', '#a3473d', '#5f7a45', '#8f6d1f', '#4d6680', '#85587a', '#4f7a73', '#a8a7a2',
-    '#7c7b77', '#c0574a', '#6f8c52', '#b08a2e', '#5f7c99', '#9a6a8e', '#5f918a', '#f6f5f2'] },
+const THEMES = {   // creamy palettes: cocoa with cream text on dark, warm cream with brown text on light
+  dark: { bg: '#24201c', fg: '#e9dfcc', dim: '#8c8273', selFg: '#1f1b17', palette: [
+    '#332d27', '#d27a68', '#9cad7a', '#dcb468', '#8ca3bd', '#c095ae', '#8db5a8', '#d9cfbd',
+    '#75695c', '#e3917f', '#b2c38f', '#ecc982', '#a4b9cf', '#d2abc1', '#a5c9bc', '#f5ecdc'] },
+  light: { bg: '#f6efe1', fg: '#4a3f36', dim: '#a39886', selFg: '#fbf7ee', palette: [
+    '#3b322b', '#a8493c', '#5f7a43', '#8e6a1d', '#4b6684', '#8a5878', '#4b7a70', '#b4a993',
+    '#857a6b', '#c25a48', '#708d50', '#ad862b', '#5d7c9c', '#9e6a8c', '#5c9086', '#fbf7ee'] },
 };
 const ANSI_NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'brightBlack', 'brightRed',
   'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'];
@@ -207,6 +211,7 @@ class Pane {
     this.term.parser.registerOscHandler(9, data => {   // 9;9;"<folder>": where the shell is
       if (!data.startsWith('9;')) return false;
       this.cwd = data.slice(2).replace(/^"(.*)"$/, '$1');
+      if (this.win.active === this) this.win.updateTitleBar();
       return true;
     });
     // the background is transparent (for the figure), so answer "what's your background?" (OSC 11) with the theme's
@@ -365,7 +370,7 @@ class Pane {
 
   setBackground(focused, multi) {   // with several panes, the focused one gets a light tint of her colour
     const bg = THEMES[this.win.theme].bg;
-    this.el.style.background = multi && focused ? mix(bg, this.colour, FOCUS_TINT) : bg;
+    this.el.style.background = this.win.glass(multi && focused ? mix(bg, this.colour, FOCUS_TINT) : bg);
   }
 
   setHovering(over) {
@@ -612,8 +617,9 @@ class Tab {
 
 
 class MagicaWindow {
-  constructor({ theme, session, command, crush }) {
+  constructor({ theme, session, command, crush, mica }) {
     this.theme = theme;
+    this.mica = mica && GLASS < 1;
     this.palette = palette(theme);
     this.charIndex = 0;   // every window starts with Madoka, then rotates
     this.fontScale = 1;
@@ -621,6 +627,9 @@ class MagicaWindow {
     this.tabs = [];
     this.current = null;
     this.tabBar = document.getElementById('tabs');
+    this.titleWho = document.querySelector('#titlebar .who');
+    this.titleWhere = document.querySelector('#titlebar .where');
+    document.body.classList.toggle('mica', this.mica);
     this.pages = document.getElementById('pages');
     this.applyCss();
     document.addEventListener('keydown', e => {   // keys outside the terminals (search box, nothing focused)
@@ -641,10 +650,15 @@ class MagicaWindow {
   applyCss() {
     const t = THEMES[this.theme], s = document.documentElement.style;
     s.setProperty('--bg', t.bg);
+    s.setProperty('--glass', this.glass(t.bg));
     s.setProperty('--fg', t.fg);
     s.setProperty('--dim', t.dim);
     s.setProperty('--accent', this.active ? this.active.colour : t.fg);
     document.documentElement.style.colorScheme = this.theme;
+  }
+
+  glass(hex) {   // a background colour, translucent over mica
+    return this.mica ? hex + Math.round(GLASS * 255).toString(16).padStart(2, '0') : hex;
   }
 
   setTheme(name) {
@@ -819,6 +833,14 @@ class MagicaWindow {
       for (const p of panes) p.setBackground(p === this.active, panes.length > 1);
     });
     this.applyCss();
+    this.updateTitleBar();
+  }
+
+  updateTitleBar() {   // the title bar says who the focused pane is and where her shell is, like the prompt
+    const p = this.active;
+    if (!p) return;
+    this.titleWho.textContent = `${p.name}@magica`;
+    this.titleWhere.textContent = p.cwd || '';
   }
 
   setFontScale(scale) {

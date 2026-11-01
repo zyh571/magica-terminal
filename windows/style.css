@@ -1,8 +1,20 @@
 /* Colours come from renderer.js (--bg, --fg, --dim, --accent) so light / dark switches in place. */
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); }
 body { display: flex; flex-direction: column; font: 13px "Segoe UI", sans-serif; }
+/* mica (Windows 11): only the title bar, tabs and panes have (translucent) backgrounds, so the desktop shows through */
+body.mica, html:has(body.mica) { background: transparent; }
 
-#tabs { display: none; flex: none; border-bottom: 1px solid var(--dim); user-select: none; overflow-x: auto; }
+/* our own title bar (main.js hides Windows'); Windows draws its buttons over the right end, so leave room for them.
+   Drag it to move the window, double-click to maximise. */
+#titlebar { flex: none; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 150px 0 14px;
+            background: var(--glass); user-select: none; -webkit-app-region: drag; white-space: nowrap; overflow: hidden; }
+#titlebar .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+                 box-shadow: 0 0 6px var(--accent); }
+#titlebar .who { flex: none; color: var(--accent); font-weight: 600; }
+#titlebar .where { color: var(--dim); overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+#titlebar .where::after { content: "\200e"; }   /* rtl ellipsis cuts the start of a long path, not its end */
+
+#tabs { display: none; flex: none; background: var(--glass); border-bottom: 1px solid var(--dim); user-select: none; overflow-x: auto; }
 body.multi-tab #tabs { display: flex; }
 .tab { padding: 6px 16px; color: var(--dim); cursor: default; white-space: nowrap; }
 .tab:hover { color: var(--fg); }
