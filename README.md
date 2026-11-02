@@ -47,6 +47,10 @@ In the shell:
 - `space [folder]` shows what takes up the disk there (Linux only): every item with a bar for its size, biggest
   first, filling in while it scans. Click a folder (or `..`) to go into it, double-click a file to open it;
   Backspace goes up (past where you started, too), C cds the shell into the folder on show, Esc or q goes back.
+- In a folder with a `.env`, its `KEY=value` lines are set in the shell (the first time, she asks; `y` / `n` is
+  remembered per folder in `~/.config/magica-terminal/env-trust`, delete its line to be asked again). Leaving the
+  folder, into a subfolder too, puts every key back as it was. The file is only read, never run; editing it while
+  you're there reloads it at the next prompt. Linux (bash) only.
 - A character turns translucent while there's text (or a coloured cell) behind her, the more of it
   (averaged over everything behind her), the more; `text_opacity` sets how far, `text_full` how much text it takes.
 
