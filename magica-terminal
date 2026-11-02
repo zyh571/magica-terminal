@@ -1792,7 +1792,8 @@ def home_path(path):
 class Notes(Gtk.Overlay):
     """`note`: one plain sheet over a pane's terminal, in the theme and the pane's colour (see Pane.open_notes). The note
     is a plain-text file, NOTE_FILE; it saves as you type and Esc goes back to the prompt. While it's open the window
-    stays above the others (Window.update_on_top), so a small window works as a sticky note."""
+    stays above the others (Window.update_on_top; on GNOME Wayland through gnome-extension/), so a small window works
+    as a sticky note."""
     UNDO_PAUSE = 1.0   # s: typing after a pause this long starts a new undo step
     UNDO_STEPS = 200
 
@@ -2872,12 +2873,34 @@ class Window(Gtk.ApplicationWindow):
         return [p for i in range(self.tabs.get_n_pages()) for p in self.panes_in(self.tabs.get_nth_page(i))]
 
     def update_on_top(self):
-        """The window stays above the others while any pane has the notepad open (where the window manager allows it;
-        GNOME on Wayland doesn't)."""
+        """The window stays above the others while any pane has the notepad open. X11 window managers do that when asked;
+        GNOME on Wayland ignores it, so there we ask the shell through our extension (gnome-extension/, see
+        shell_keep_above)."""
         on = any(p.notes for p in self.all_panes())
         if on != self.on_top:
             self.on_top = on
             self.set_keep_above(on)
+            self.shell_keep_above(on)
+
+    def shell_keep_above(self, on, tries=10):
+        """Ask the Magica Terminal GNOME Shell extension to keep this window above the others (or not). Quietly does
+        nothing without it (or outside GNOME). The shell may not know the window yet just after it opens: try again."""
+        app = self.get_application()
+        conn = app.get_dbus_connection() if app else None
+        if conn is None or not os.environ.get("WAYLAND_DISPLAY"):
+            return
+        path = f"{app.get_dbus_object_path()}/window/{self.get_id()}"
+
+        def done(conn, res):
+            try:
+                found = conn.call_finish(res).unpack()[0]
+            except GLib.Error:   # no extension (or no GNOME Shell)
+                return
+            if not found and tries > 1 and self.on_top == on and self.get_realized():
+                GLib.timeout_add(300, lambda: self.shell_keep_above(on, tries - 1) and False)
+
+        conn.call("org.gnome.Shell", "/dev/local/MagicaTerminal", "dev.local.MagicaTerminal", "SetAbove",
+                  GLib.Variant("(sb)", (path, on)), GLib.VariantType("(b)"), Gio.DBusCallFlags.NONE, 1000, None, done)
 
     def update_frames(self):
         for i in range(self.tabs.get_n_pages()):

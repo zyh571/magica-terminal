@@ -37,8 +37,9 @@ In the shell:
   the prompt.
 - `note` opens the notepad over that pane: one plain sheet in the theme and her colour. It saves as you type to
   `~/.config/magica-terminal/note.txt` (Ctrl+S saves now, Ctrl+Z / Ctrl+Shift+Z undo / redo) and Esc goes back to the
-  prompt. While it's open the window stays on top of other windows, so a small window works as a sticky note (on X11;
-  GNOME on Wayland doesn't let windows keep themselves on top). `note buy milk` adds a line to it without opening it;
+  prompt. While it's open the window stays on top of other windows, so a small window works as a sticky note. GNOME on
+  Wayland doesn't let windows keep themselves on top, so `install.sh` adds a small GNOME Shell extension
+  (`gnome-extension/`) that does it for her; log out and back in once to load it. `note buy milk` adds a line to it without opening it;
   `magica-terminal --note` opens a window with the notepad in its first pane.
 - `browser [address or search]` opens a web page over that pane (Linux only, WebKitGTK). ✕ or Ctrl+Shift+W
   goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. A video's full screen

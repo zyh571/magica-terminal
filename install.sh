@@ -29,7 +29,21 @@ if [ -z "$(fc-list "Maple Mono")" ]; then
   rm -rf "$tmp"
 fi
 
-line="[ -r \"$DIR/shell/magica.bash\" ] && . \"$DIR/shell/magica.bash\"   # Magica Terminal"
+# GNOME on Wayland won't let a window keep itself on top; this small GNOME Shell extension does it for the notepad.
+# GNOME Shell only finds a new extension when it starts, so on Wayland it works after you log out and back in.
+EXT="magica-terminal@dev.local"
+if command -v gnome-shell >/dev/null; then
+  mkdir -p "$HOME/.local/share/gnome-shell/extensions"
+  ln -sfn "$DIR/gnome-extension" "$HOME/.local/share/gnome-shell/extensions/$EXT"
+  enabled="$(gsettings get org.gnome.shell enabled-extensions)"
+  if [[ "$enabled" != *"'$EXT'"* ]]; then
+    if [[ "$enabled" == *"[]"* ]]; then new="['$EXT']"; else new="${enabled%]}, '$EXT']"; fi
+    gsettings set org.gnome.shell enabled-extensions "$new"
+    echo "enabled the GNOME Shell extension $EXT (keeps the notepad on top; log out and back in to load it)"
+  fi
+fi
+
+line="[ -r\"$DIR/shell/magica.bash\" ] && . \"$DIR/shell/magica.bash\"   # Magica Terminal"
 if ! grep -qF "$DIR/shell/magica.bash" "$HOME/.bashrc" 2>/dev/null; then
   printf '\n%s\n' "$line" >> "$HOME/.bashrc"
   echo "added shell integration to ~/.bashrc"
