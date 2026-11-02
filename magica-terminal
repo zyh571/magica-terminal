@@ -74,7 +74,7 @@ FIGURES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "figures")  
 THEME_FILE = os.path.expanduser("~/.config/magica-terminal/theme")   # "light", "dark" or "system"
 COLORS_FILE = os.path.expanduser("~/.config/magica-terminal/colors.sh")   # prompt colours for ~/.bashrc
 SESSION_FILE = os.path.expanduser("~/.config/magica-terminal/session.json")   # tabs / splits saved on close
-FONT = "Ubuntu Sans Mono 11"
+FONT = "Maple Mono, Ubuntu Sans Mono 11"   # Maple Mono (soft, rounded; ./install.sh fetches it), else Ubuntu's
 PADDING = 10              # px around the text
 
 # Figure size, as at full screen (1920x1080). Like Ghostty's "cover" on a 16:9 canvas, a pane keeps
@@ -121,6 +121,7 @@ LAYOUTS = {
     "pair": ("h", ["madoka", "homura"]),
     "magica": ("v", [("h", ["madoka", "homura"]), ("h", ["sayaka", "mami", "kyoko"])]),
 }
+WINDOW_RADIUS = 12        # px, the window's bottom corners (the theme's title bar has the same at the top)
 FRAME_WIDTH = 0           # border around the focused pane (only shown when a tab has several panes)
 UNFOCUSED_OVERLAY = "transparent"   # optional veil over unfocused panes, e.g. "rgba(128, 128, 128, 0.18)"
 TEXT_SATURATION = 0.55    # normal text (commands, output): her colour at this fraction of the saturation
@@ -156,7 +157,7 @@ SETTINGS_FILE = os.path.expanduser("~/.config/magica-terminal/settings.json")
 SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HEIGHT", "BASE_GAP", "HOVER_OPACITY",
             "TEXT_OPACITY", "TEXT_FULL", "TEXT_CONTRAST",
             "FAIL_FLASH", "FAIL_TINT", "FAIL_SQUASH", "FAIL_RED", "IGNORED_EXIT", "LONG_COMMAND", "HOP_HEIGHT", "HOPS",
-            "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH",
+            "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH", "WINDOW_RADIUS",
             "UNFOCUSED_OVERLAY", "TEXT_SATURATION", "PATH_SATURATION", "FOCUS_BRIGHTEN", "FOCUS_TINT",
             "UNFOCUSED_SATURATION", "CRUSH_SIZE", "CRUSH_SPEED", "CRUSH_HINT_AFTER", "CRUSH_AUTOPLAY", "CRUSH_AUTOPLAY_DELAY",
             "CRUSH_CHAIN_LUCK", "CRUSH_LUCKY_STRIPES", "CRUSH_CHAIN_FADE", "NOTE_SAVE_AFTER", "BROWSER_HOME", "BROWSER_SEARCH"]
@@ -204,8 +205,8 @@ def load_settings():
 load_settings()
 
 THEMES = {   # creamy palettes: cocoa with cream text on dark, warm cream with brown text on light (as on Windows)
-    "dark": dict(bg="#24201c", fg="#e9dfcc", dim="#8c8273", sel_fg="#1f1b17", palette=[
-        "#332d27", "#d27a68", "#9cad7a", "#dcb468", "#8ca3bd", "#c095ae", "#8db5a8", "#d9cfbd",
+    "dark": dict(bg="#2b231c", fg="#efe3cc", dim="#93846f", sel_fg="#1f1b17", palette=[
+        "#3a3029", "#d27a68", "#9cad7a", "#dcb468", "#8ca3bd", "#c095ae", "#8db5a8", "#d9cfbd",
         "#75695c", "#e3917f", "#b2c38f", "#ecc982", "#a4b9cf", "#d2abc1", "#a5c9bc", "#f5ecdc"]),
     "light": dict(bg="#f6efe1", fg="#4a3f36", dim="#a39886", sel_fg="#fbf7ee", palette=[
         "#3b322b", "#a8493c", "#5f7a43", "#8e6a1d", "#4b6684", "#8a5878", "#4b7a70", "#b4a993",
@@ -231,6 +232,11 @@ def write_file(path, text):
         except OSError:
             pass
         return False
+
+
+def css_families(font):
+    """A Pango font's family list ("Maple Mono,Ubuntu Sans Mono") as CSS: each name quoted on its own."""
+    return ", ".join(f'"{f.strip()}"' for f in font.get_family().split(",") if f.strip())
 
 
 def rgba(hex_colour, alpha=1.0):
@@ -1838,9 +1844,9 @@ class Notes(Gtk.Overlay):
         css = f"""
             * {{ background-color: {t['bg']}; }}
             textview, textview text {{ background-color: {t['bg']}; color: {t['fg']}; caret-color: {colour};
-                font-family: "{font.get_family()}"; font-size: {pt:.1f}pt; }}
+                font-family: {css_families(font)}; font-size: {pt:.1f}pt; }}
             textview text selection {{ background-color: {colour}; color: {t['bg']}; }}
-            .magica-notes-hint {{ background: none; color: {t['dim']}; font-family: "{font.get_family()}"; font-size: {pt:.1f}pt; }}
+            .magica-notes-hint {{ background: none; color: {t['dim']}; font-family: {css_families(font)}; font-size: {pt:.1f}pt; }}
             .magica-notes-status {{ background: none; color: #d9566c; font-size: 0.85em; }}
             scrollbar, scrollbar trough {{ background: none; border: none; }}
             scrollbar slider {{ background-color: {mix(t['bg'], t['dim'], 0.45)}; border: none; min-width: 6px; }}
@@ -2554,8 +2560,43 @@ class Window(Gtk.ApplicationWindow):
         self.add(self.tabs)
         self.connect("key-press-event", self.on_key)
         self.connect("delete-event", lambda *_: self.save_session() or False)
+        self.tabs.connect("draw", self.round_bottom_corners)
         if not (command is None and not other_instance_running() and self.restore_session()):
             self.new_tab(command=command)
+
+    def round_bottom_corners(self, tabs, cr):
+        """The theme rounds the window's outline and background (load_css), but GTK 3 doesn't clip what's inside, so
+        clip the tabs to the same rounded corners at the bottom (not when maximised, tiled or full screen)."""
+        gdk_win = self.get_window()
+        if gdk_win is None or not self.is_composited():   # (without a compositor the corners would go black)
+            return False
+        if gdk_win.get_state() & (Gdk.WindowState.MAXIMIZED | Gdk.WindowState.FULLSCREEN | Gdk.WindowState.TILED):
+            return False
+        w, h, r = tabs.get_allocated_width(), tabs.get_allocated_height(), WINDOW_RADIUS
+        cr.move_to(0, 0)
+        cr.line_to(w, 0)
+        cr.arc(w - r, h - r, r, 0, math.pi / 2)
+        cr.arc(r, h - r, r, math.pi / 2, math.pi)
+        cr.close_path()
+        cr.clip()
+        return False
+        if gdk_win.get_state() & (Gdk.WindowState.MAXIMIZED | Gdk.WindowState.FULLSCREEN | Gdk.WindowState.TILED):
+            return False
+        a, r = self.tabs.get_allocation(), WINDOW_RADIUS
+        left, right, bottom = a.x, a.x + a.width, a.y + a.height
+        cr.save()
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.move_to(left, bottom)
+        cr.line_to(left, bottom - r)
+        cr.arc_negative(left + r, bottom - r, r, math.pi, math.pi / 2)
+        cr.close_path()
+        cr.move_to(right, bottom)
+        cr.line_to(right - r, bottom)
+        cr.arc_negative(right - r, bottom - r, r, math.pi / 2, 0)
+        cr.close_path()
+        cr.fill()
+        cr.restore()
+        return False
 
     def next_character(self):
         c = CHARACTERS[self.char_index % len(CHARACTERS)]
@@ -2567,6 +2608,7 @@ class Window(Gtk.ApplicationWindow):
         accent = self.active.colour if self.active else t["fg"]
         css = f"""
             window, notebook, notebook > stack, .magica-bg {{ background: {t['bg']}; }}
+            window.csd, window.csd decoration {{ border-radius: {WINDOW_RADIUS}px; }}
             headerbar.magica-titlebar, headerbar.magica-titlebar:backdrop {{ background: {t['bg']}; border: none;
                 box-shadow: none; min-height: 36px; padding: 0 6px 0 14px; }}
             .magica-dot {{ min-width: 10px; min-height: 10px; border-radius: 50%; background: {accent};

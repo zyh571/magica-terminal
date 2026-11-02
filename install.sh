@@ -14,6 +14,21 @@ sed "s|@BIN@|$BIN|" "$DIR/magica-terminal.desktop" > "$APPS/magica-terminal.desk
 update-desktop-database "$APPS" 2>/dev/null || true
 echo "linked $BIN -> $DIR/magica-terminal"
 
+# the terminal's font, Maple Mono (SIL Open Font License), for this user; without it the app uses Ubuntu Sans Mono
+FONTS="$HOME/.local/share/fonts/MapleMono"
+MAPLE="https://github.com/subframe7536/maple-font/releases/download/v7.9/MapleMono-TTF.zip"
+MAPLE_SHA256="3a35f8f0669bef3dded9df208cc4526a6f7573210e134816e9084a8981271d75"
+if [ -z "$(fc-list "Maple Mono")" ]; then
+  tmp="$(mktemp -d)"
+  if curl -fsSL -o "$tmp/maple.zip" "$MAPLE" && echo "$MAPLE_SHA256  $tmp/maple.zip" | sha256sum -c --quiet; then
+    mkdir -p "$FONTS" && unzip -oq "$tmp/maple.zip" -d "$FONTS" && fc-cache -f "$FONTS"
+    echo "installed the Maple Mono font ($FONTS)"
+  else
+    echo "couldn't fetch the Maple Mono font; using Ubuntu Sans Mono"
+  fi
+  rm -rf "$tmp"
+fi
+
 line="[ -r \"$DIR/shell/magica.bash\" ] && . \"$DIR/shell/magica.bash\"   # Magica Terminal"
 if ! grep -qF "$DIR/shell/magica.bash" "$HOME/.bashrc" 2>/dev/null; then
   printf '\n%s\n' "$line" >> "$HOME/.bashrc"
