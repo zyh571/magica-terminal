@@ -35,6 +35,11 @@ In the shell:
 - `pair` lays out Madoka | Homura; `magica` all five (Madoka, Homura above; Sayaka, Mami, Kyoko below).
 - `crush` opens Magica Crush in that pane: a pixel-art match-3 game with the five soul gems. Esc or q goes back to
   the prompt.
+- `note` opens the notepad over that pane: one plain sheet in the theme and her colour. It saves as you type to
+  `~/.config/magica-terminal/note.txt` (Ctrl+S saves now, Ctrl+Z / Ctrl+Shift+Z undo / redo) and Esc goes back to the
+  prompt. While it's open the window stays on top of other windows, so a small window works as a sticky note (on X11;
+  GNOME on Wayland doesn't let windows keep themselves on top). `note buy milk` adds a line to it without opening it;
+  `magica-terminal --note` opens a window with the notepad in its first pane.
 - `browser [address or search]` opens a web page over that pane (Linux only, WebKitGTK). ✕ or Ctrl+Shift+W
   goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. A video's full screen
   fills the pane (Esc leaves it). She stays in front, translucent. Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
@@ -53,6 +58,9 @@ the best score kept in `~/.config/magica-terminal/crush.json`. Press A to let it
 over); `"crush_autoplay": true` in the settings starts every game that way. A game autoplay has touched doesn't set a best
 score.
 
+The window draws its own title bar: a dot and `name@magica` in the focused pane's colour, and the folder her shell is
+in (as the prompt shows it).
+
 She reacts to what you run: a small jump when a command succeeds, a red squash when it fails, three hops (plus a
 notification if the window isn't focused) when a long command finishes in a pane you weren't looking at, and an
 occasional bob or breath while idle.
@@ -70,6 +78,9 @@ the constants at the top of `magica-terminal` (or `windows/renderer.js`):
 ```
 
 Changes apply to new windows. Unknown names and bad values are ignored with a warning.
+
+Settings, the theme, the session, the note and Crush's best score are saved through a temporary file renamed over the
+old one, so a crash mid-save never leaves a half-written file.
 
 Closing the window saves tabs, splits, characters and folders to `~/.config/magica-terminal/session.json`; the
 next launch restores them.

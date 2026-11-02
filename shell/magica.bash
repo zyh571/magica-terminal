@@ -30,6 +30,17 @@ if [ -n "$MAGICA_CHAR" ]; then
   unset _magica_l
   # `crush`: a match-3 game with the soul gems, in this pane (Esc / q comes back to the prompt)
   crush() { printf '\033]0;magica:crush\007'; sleep 0.1; }   # (the sleep lets the terminal see the title before the prompt resets it)
+  # `note`: the notepad, in this pane (Esc comes back to the prompt). `note buy milk` adds "buy milk" as a line at the
+  # end of it without opening it. The note is a plain-text file, ~/.config/magica-terminal/note.txt.
+  note() {
+    if [ $# -eq 0 ]; then printf '\033]0;magica:note\007'; sleep 0.1; return; fi
+    local f=~/.config/magica-terminal/note.txt n
+    mkdir -p "${f%/*}" || return
+    if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf '\n' >> "$f"; fi   # (it didn't end with a newline)
+    printf '%s\n' "$*" >> "$f" || return
+    eval "n=\${_mc_${MAGICA_CHAR}_name:-100}"
+    printf '\e[38;5;%smnoted\e[0m\n' "$n"
+  }
   # `browser [address or search]`: a web page in this pane (✕ or Ctrl+Shift+W comes back to the prompt)
   browser() { printf '\033]0;magica:browser:%s\007' "$(printf '%s' "$*" | tr -d '\000-\037')"; sleep 0.1; }
   # `space [folder]`: what takes up the disk there, in this pane (Esc / q comes back; C cds into the folder on show)

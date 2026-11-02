@@ -24,6 +24,9 @@ Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload; a video's full s
 Logins and cookies are kept in ~/.local/share/magica-terminal/web.
 Typing `space [folder]` shows what takes up the disk there: every item with a bar for its size, biggest first. Click a
 folder (or ..) to go into it, double-click a file to open it; Backspace goes up, C cds the shell there, Esc / q goes back.
+Typing `note` opens the notepad over that pane (~/.config/magica-terminal/note.txt; saves as you type, Esc goes back,
+Ctrl+Z / Ctrl+Shift+Z undo / redo); the window stays above the others while it's open. `note buy milk` adds a line to it.
+`magica-terminal --note` opens it like --crush. The title bar shows the focused pane's name@magica and her shell's folder.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
@@ -102,6 +105,8 @@ CRUSH_AUTOPLAY_DELAY = 0.6  # …s autoplay waits between moves
 CRUSH_CHAIN_LUCK = 0.4    # …chance a head dropping in during a chain copies a neighbour (so chains keep going)
 CRUSH_LUCKY_STRIPES = 0.05  # …chance it drops in already striped
 CRUSH_CHAIN_FADE = 0.72   # …both shrink this much per chain step, so chains still end
+NOTE_FILE = os.path.expanduser("~/.config/magica-terminal/note.txt")   # `note`: the notepad (plain text)
+NOTE_SAVE_AFTER = 0.4      # `note`: s after the last keystroke before it saves
 BROWSER_HOME = "https://www.google.com/"            # `browser` with nothing after it
 BROWSER_SEARCH = "https://www.google.com/search?q={}"  # `browser` with words that aren't an address
 
@@ -154,7 +159,7 @@ SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HE
             "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH",
             "UNFOCUSED_OVERLAY", "TEXT_SATURATION", "PATH_SATURATION", "FOCUS_BRIGHTEN", "FOCUS_TINT",
             "UNFOCUSED_SATURATION", "CRUSH_SIZE", "CRUSH_SPEED", "CRUSH_HINT_AFTER", "CRUSH_AUTOPLAY", "CRUSH_AUTOPLAY_DELAY",
-            "CRUSH_CHAIN_LUCK", "CRUSH_LUCKY_STRIPES", "CRUSH_CHAIN_FADE", "BROWSER_HOME", "BROWSER_SEARCH"]
+            "CRUSH_CHAIN_LUCK", "CRUSH_LUCKY_STRIPES", "CRUSH_CHAIN_FADE", "NOTE_SAVE_AFTER", "BROWSER_HOME", "BROWSER_SEARCH"]
 
 
 def load_settings():
@@ -198,14 +203,34 @@ def load_settings():
 
 load_settings()
 
-THEMES = {   # Tiro Finale palettes (same as the Ghostty themes)
-    "dark": dict(bg="#1d1d1c", fg="#d4d2cc", dim="#7f7d78", sel_fg="#1b1a1f", palette=[
-        "#2b2b2a", "#c46a5e", "#8fa874", "#c9a54a", "#7f9bb8", "#b08aa8", "#7fada6", "#bdbbb5",
-        "#6b6a66", "#d98275", "#a5bd8a", "#e0bd5e", "#98b2cc", "#c6a0bd", "#95c2bb", "#ecebe7"]),
-    "light": dict(bg="#e9e8e4", fg="#3a3a3a", dim="#9a9893", sel_fg="#f6f5f2", palette=[
-        "#2e2e2e", "#a3473d", "#5f7a45", "#8f6d1f", "#4d6680", "#85587a", "#4f7a73", "#a8a7a2",
-        "#7c7b77", "#c0574a", "#6f8c52", "#b08a2e", "#5f7c99", "#9a6a8e", "#5f918a", "#f6f5f2"]),
+THEMES = {   # creamy palettes: cocoa with cream text on dark, warm cream with brown text on light (as on Windows)
+    "dark": dict(bg="#24201c", fg="#e9dfcc", dim="#8c8273", sel_fg="#1f1b17", palette=[
+        "#332d27", "#d27a68", "#9cad7a", "#dcb468", "#8ca3bd", "#c095ae", "#8db5a8", "#d9cfbd",
+        "#75695c", "#e3917f", "#b2c38f", "#ecc982", "#a4b9cf", "#d2abc1", "#a5c9bc", "#f5ecdc"]),
+    "light": dict(bg="#f6efe1", fg="#4a3f36", dim="#a39886", sel_fg="#fbf7ee", palette=[
+        "#3b322b", "#a8493c", "#5f7a43", "#8e6a1d", "#4b6684", "#8a5878", "#4b7a70", "#b4a993",
+        "#857a6b", "#c25a48", "#708d50", "#ad862b", "#5d7c9c", "#9e6a8c", "#5c9086", "#fbf7ee"]),
 }
+
+
+def write_file(path, text):
+    """Write a whole file so a crash or power cut mid-save leaves either the old contents or the new, never half: write a
+    temporary file next to it, flush it to disk, then rename it over the original. Returns whether it worked."""
+    tmp = f"{path}.{os.getpid()}.tmp"   # (per process: two windows saving at once don't share one)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
 
 
 def rgba(hex_colour, alpha=1.0):
@@ -296,11 +321,7 @@ def write_prompt_colours(theme):
         lines.append(f"_mc_{name}_name={CHAR_SLOTS + 3 * i}; _mc_{name}_text={CHAR_SLOTS + 3 * i + 1}; "
                      f"_mc_{name}_path={CHAR_SLOTS + 3 * i + 2}")
     lines.append(f"_mc_red={RED_SLOT}")
-    try:
-        os.makedirs(os.path.dirname(COLORS_FILE), exist_ok=True)
-        open(COLORS_FILE, "w").write("\n".join(lines) + "\n")
-    except OSError:
-        pass
+    write_file(COLORS_FILE, "\n".join(lines) + "\n")
 
 
 def saved_theme():
@@ -312,11 +333,7 @@ def saved_theme():
 
 
 def save_theme(name):
-    try:
-        os.makedirs(os.path.dirname(THEME_FILE), exist_ok=True)
-        open(THEME_FILE, "w").write(name + "\n")
-    except OSError:
-        pass
+    write_file(THEME_FILE, name + "\n")
 
 
 
@@ -834,12 +851,7 @@ class Crush(Gtk.EventBox):
             return 0
 
     def save_best(self):
-        try:
-            os.makedirs(os.path.dirname(CRUSH_FILE), exist_ok=True)
-            with open(CRUSH_FILE, "w") as f:
-                json.dump({"best": self.best}, f)
-        except OSError:
-            pass
+        write_file(CRUSH_FILE, json.dumps({"best": self.best}))
 
     def sync_sprites(self):
         """Sprites exactly as the board is (after a turn, in case an animation missed something)."""
@@ -1761,6 +1773,157 @@ class SpaceView(Gtk.Box):
         return True
 
 
+# ── note: a notepad over the pane (`note` in the shell) ──
+
+def home_path(path):
+    """path with the home folder shortened to ~, like the prompt does (/home/me2 stays as it is)."""
+    home = os.path.expanduser("~").rstrip("/")
+    if home and (path == home or path.startswith(home + "/")):
+        return "~" + path[len(home):]
+    return path
+
+
+class Notes(Gtk.Overlay):
+    """`note`: one plain sheet over a pane's terminal, in the theme and the pane's colour (see Pane.open_notes). The note
+    is a plain-text file, NOTE_FILE; it saves as you type and Esc goes back to the prompt. While it's open the window
+    stays above the others (Window.update_on_top), so a small window works as a sticky note."""
+    UNDO_PAUSE = 1.0   # s: typing after a pause this long starts a new undo step
+    UNDO_STEPS = 200
+
+    def __init__(self, pane):
+        super().__init__()
+        self.pane = pane
+        self.dirty = False
+        self._timer = None
+        self._css_text = None
+        self.css = Gtk.CssProvider()
+        self.view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=True,
+                                 left_margin=24, right_margin=24, top_margin=18, bottom_margin=18)
+        self.buffer = self.view.get_buffer()
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.add(self.view)
+        self.add(scroller)
+        self.hint = Gtk.Label(label="Start typing.", halign=Gtk.Align.START, valign=Gtk.Align.START,
+                              margin_start=24, margin_top=18)
+        self.hint.get_style_context().add_class("magica-notes-hint")
+        self.add_overlay(self.hint)
+        self.set_overlay_pass_through(self.hint, True)
+        self.status = Gtk.Label(halign=Gtk.Align.END, valign=Gtk.Align.END, margin_end=16, margin_bottom=8)
+        self.status.get_style_context().add_class("magica-notes-status")
+        self.add_overlay(self.status)
+        self.set_overlay_pass_through(self.status, True)
+        for w in (self, scroller, self.view, self.hint, self.status):
+            w.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
+        self.restyle()
+
+        # GTK 3's text view has no undo: keep whole-text snapshots, one per burst of typing (it's one small note)
+        self.undo, self.redo = [], []
+        self._last_edit, self._restoring = 0.0, False
+        self.shown = self.load()
+        self.buffer.set_text(self.shown)
+        self.buffer.place_cursor(self.buffer.get_end_iter())
+        self.hint.set_no_show_all(True)
+        self.hint.set_visible(not self.shown)
+        self.buffer.connect("changed", self.on_changed)
+        self.view.connect("key-press-event", self.on_key)
+        self.connect("destroy", lambda *_: self.save())
+        GLib.idle_add(lambda: self.view.scroll_to_mark(self.buffer.get_insert(), 0, False, 0, 0) and False)
+
+    def restyle(self):
+        """Theme, her colour and the font size (after a theme or character switch, or Ctrl+Shift+Plus / Minus)."""
+        t, colour = self.pane.theme, self.pane.colour
+        font = Pango.FontDescription.from_string(FONT)
+        pt = font.get_size() / Pango.SCALE * self.pane.win.font_scale
+        gap = round(pt * 96 / 72 * 0.65)   # line height ~1.65
+        css = f"""
+            * {{ background-color: {t['bg']}; }}
+            textview, textview text {{ background-color: {t['bg']}; color: {t['fg']}; caret-color: {colour};
+                font-family: "{font.get_family()}"; font-size: {pt:.1f}pt; }}
+            textview text selection {{ background-color: {colour}; color: {t['bg']}; }}
+            .magica-notes-hint {{ background: none; color: {t['dim']}; font-family: "{font.get_family()}"; font-size: {pt:.1f}pt; }}
+            .magica-notes-status {{ background: none; color: #d9566c; font-size: 0.85em; }}
+            scrollbar, scrollbar trough {{ background: none; border: none; }}
+            scrollbar slider {{ background-color: {mix(t['bg'], t['dim'], 0.45)}; border: none; min-width: 6px; }}
+        """
+        if css != self._css_text:
+            self._css_text = css
+            self.css.load_from_data(css.encode())
+            self.view.set_pixels_below_lines(gap)
+            self.view.set_pixels_inside_wrap(gap)
+
+    def load(self):
+        try:
+            with open(NOTE_FILE, encoding="utf-8", errors="replace") as f:
+                return f.read().lstrip("﻿")
+        except OSError:
+            return ""
+
+    def text(self):
+        return self.buffer.get_text(self.buffer.get_start_iter(), self.buffer.get_end_iter(), True)
+
+    def save(self):
+        if self._timer:
+            GLib.source_remove(self._timer)
+            self._timer = None
+        if not self.dirty:
+            return
+        ok = write_file(NOTE_FILE, self.text())
+        self.dirty = not ok
+        self.status.set_text("" if ok else "could not save")
+
+    def on_changed(self, _):
+        text = self.text()
+        if not self._restoring:
+            now = time.monotonic()
+            if now - self._last_edit > self.UNDO_PAUSE:
+                self.undo.append(self.shown)
+                del self.undo[:-self.UNDO_STEPS]
+            self.redo.clear()
+            self._last_edit = now
+        self.shown = text
+        self.hint.set_visible(not text)
+        self.dirty = True
+        if self._timer:
+            GLib.source_remove(self._timer)
+        self._timer = GLib.timeout_add(int(NOTE_SAVE_AFTER * 1000), self.on_timer)
+
+    def on_timer(self):
+        self._timer = None
+        self.save()
+        return False
+
+    def step(self, back):
+        """Undo (back) or redo one burst of typing; the cursor goes to where the text changed."""
+        frm, to = (self.undo, self.redo) if back else (self.redo, self.undo)
+        if not frm:
+            return
+        old, new = self.shown, frm.pop()
+        to.append(old)
+        at = next((i for i, (a, b) in enumerate(zip(old, new)) if a != b), min(len(old), len(new)))
+        self._restoring = True
+        self.buffer.set_text(new)
+        self._restoring = False
+        self._last_edit = 0.0   # typing after an undo starts a new step
+        self.buffer.place_cursor(self.buffer.get_iter_at_offset(at))
+        self.view.scroll_to_mark(self.buffer.get_insert(), 0.1, False, 0, 0)
+
+    def on_key(self, _, event):
+        state = event.state & Gtk.accelerator_get_default_mod_mask()
+        ctrl, shift = Gdk.ModifierType.CONTROL_MASK, Gdk.ModifierType.SHIFT_MASK
+        key = Gdk.keyval_to_lower(event.keyval)
+        if event.keyval == Gdk.KEY_Escape and not state:
+            self.pane.close_notes()
+        elif state == ctrl and key == Gdk.KEY_s:
+            self.save()
+        elif state == ctrl and key == Gdk.KEY_z:
+            self.step(back=True)
+        elif (state == ctrl | shift and key == Gdk.KEY_z) or (state == ctrl and key == Gdk.KEY_y):
+            self.step(back=False)
+        else:
+            return False
+        return True
+
+
 class Pane(Gtk.Overlay):
     """One terminal over a backdrop with its character's figure."""
 
@@ -1770,6 +1933,8 @@ class Pane(Gtk.Overlay):
         self.game = None          # the `crush` game while it's open over this pane
         self.browser = None       # the `browser` page while it's open over this pane
         self.space = None         # the `space` view while it's open over this pane
+        self.notes = None         # the `note` notepad while it's open over this pane
+        self.where = home_path(cwd or os.getcwd() or os.path.expanduser("~"))   # her shell's folder, for the title bar
         t = THEMES[app_window.theme]
         self.theme = t
         self.focused = False
@@ -1890,6 +2055,8 @@ class Pane(Gtk.Overlay):
         self.theme = t
         self.colour = self.character[2] if self.win.theme == "dark" else self.character[3]
         self.set_focused(self.focused)
+        if self.notes:
+            self.notes.restyle()
 
     def open_game(self):
         """`crush`: the game covers the terminal (the shell waits underneath) until Esc / q."""
@@ -1963,6 +2130,28 @@ class Pane(Gtk.Overlay):
         self.queue_cover_check()
         self.term.grab_focus()
 
+    def open_notes(self):
+        """`note`: the notepad covers the terminal (the shell waits underneath) until Esc."""
+        if not self.notes:
+            self.notes = Notes(self)
+            self.add_overlay(self.notes)
+            self.reorder_overlay(self.notes, 1)   # just above the terminal, under the frame and search bar
+            self.notes.view.connect("focus-in-event", lambda *_: self.set_focused(True))
+            self.notes.view.connect("focus-out-event", lambda *_: self.set_focused(False))
+            self.notes.show_all()
+            self.update_figure()
+            self.win.update_on_top()
+        self.notes.view.grab_focus()
+
+    def close_notes(self):
+        if not self.notes:
+            return
+        self.notes.destroy()   # (saves)
+        self.notes = None
+        self.update_figure()
+        self.win.update_on_top()
+        self.term.grab_focus()
+
     def close_game(self):
         if not self.game:
             return
@@ -1997,7 +2186,7 @@ class Pane(Gtk.Overlay):
         self.last_activity = time.monotonic()
 
     def idle_tick(self):
-        if (time.monotonic() - self.last_activity >= IDLE_AFTER and self.get_mapped() and not self.hovering and not self.game
+        if (time.monotonic() - self.last_activity >= IDLE_AFTER and self.get_mapped() and not self.hovering and not self.game and not self.notes
                 and not getattr(self, "_hopping", False) and not getattr(self, "_breathing", False)):
             self.hop(IDLE_BOB, 2) if random.random() < 0.5 else self.breathe()
         self._idle_id = GLib.timeout_add(int(random.uniform(*IDLE_EVERY) * 1000), self.idle_tick)
@@ -2022,6 +2211,9 @@ class Pane(Gtk.Overlay):
         if title == "magica:crush":   # `crush` (see ~/.bashrc): the game, in this pane
             GLib.idle_add(lambda: self.open_game() and False)
             return
+        if title == "magica:note":   # `note` (see ~/.bashrc): the notepad, in this pane
+            GLib.idle_add(lambda: self.open_notes() and False)
+            return
         if title.startswith("magica:space:"):   # `space [folder]` (see ~/.bashrc)
             path = title[len("magica:space:"):]
             GLib.idle_add(lambda: self.open_space(path) and False)
@@ -2043,6 +2235,9 @@ class Pane(Gtk.Overlay):
                     self.set_focused(self.focused)
                     break
             return
+        m = re.match(r"\w+@magica: (.*)", title)   # the prompt's title (~/.bashrc): her folder, as \w shows it
+        if m:
+            self.where = m.group(1)
         self.win.update_title()
 
     def on_spawned(self, term, pid, error, *_):
@@ -2082,6 +2277,8 @@ class Pane(Gtk.Overlay):
         self.term.set_color_highlight(rgba(self.colour))
         self.term.set_color_highlight_foreground(rgba(self.theme["sel_fg"]))
         self.update_figure()
+        if self.notes:
+            self.notes.restyle()   # (her colour, after a character switch)
         if focused:
             self.win.active = self
             self.win.update_title()
@@ -2288,7 +2485,7 @@ class Pane(Gtk.Overlay):
         w, h = self.get_allocated_width(), self.get_allocated_height()
         if w <= 1 or h <= 1:
             return False
-        hidden = self.game or self.browser and self.browser.fullscreen   # no figure or bar over the game or a video
+        hidden = self.game or self.notes or self.browser and self.browser.fullscreen   # none over the game, notepad or a video
         self.img.set_visible(not hidden)
         if hidden:
             self.base.set_visible(False)
@@ -2330,7 +2527,23 @@ class Window(Gtk.ApplicationWindow):
         write_prompt_colours(self.theme)
         self.active = None
         self.font_scale = 1.0
+        self.on_top = False
         self.set_default_size(1100, 700)
+        # our own title bar: a dot and name in the focused pane's colour, and her shell's folder (the window manager's
+        # buttons stay at the right end, in the theme's colours)
+        self.header = Gtk.HeaderBar(show_close_button=True)
+        self.header.get_style_context().add_class("magica-titlebar")
+        info = Gtk.Box(spacing=8, hexpand=True)
+        self.title_dot = Gtk.Box(valign=Gtk.Align.CENTER)
+        self.title_who = Gtk.Label()
+        self.title_where = Gtk.Label(ellipsize=Pango.EllipsizeMode.START, xalign=0)   # a long path loses its start
+        for w, c in ((self.title_dot, "magica-dot"), (self.title_who, "magica-who"), (self.title_where, "magica-where")):
+            w.get_style_context().add_class(c)
+        info.pack_start(self.title_dot, False, False, 0)
+        info.pack_start(self.title_who, False, False, 0)
+        info.pack_start(self.title_where, True, True, 0)
+        self.header.set_custom_title(info)
+        self.set_titlebar(self.header)
         self.css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), self.css,
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -2354,6 +2567,15 @@ class Window(Gtk.ApplicationWindow):
         accent = self.active.colour if self.active else t["fg"]
         css = f"""
             window, notebook, notebook > stack, .magica-bg {{ background: {t['bg']}; }}
+            headerbar.magica-titlebar, headerbar.magica-titlebar:backdrop {{ background: {t['bg']}; border: none;
+                box-shadow: none; min-height: 36px; padding: 0 6px 0 14px; }}
+            .magica-dot {{ min-width: 10px; min-height: 10px; border-radius: 50%; background: {accent};
+                box-shadow: 0 0 6px {accent}; }}
+            .magica-who {{ color: {accent}; font-weight: bold; }}
+            .magica-where {{ color: {t['dim']}; }}
+            headerbar.magica-titlebar button {{ color: {t['fg']}; background: none; border: none; box-shadow: none; }}
+            headerbar.magica-titlebar button:hover {{ background: {mix(t['bg'], t['fg'], 0.12)}; }}
+            headerbar.magica-titlebar button:backdrop {{ color: {t['dim']}; }}
             paned > separator {{ background: {t['dim']}; min-width: 1px; min-height: 1px; }}
             notebook > header {{ background: {t['bg']}; border-color: {t['dim']}; box-shadow: none; }}
             notebook > header > tabs > tab {{ background: transparent; box-shadow: none; border: none; }}
@@ -2478,11 +2700,9 @@ class Window(Gtk.ApplicationWindow):
         try:
             data = {"size": list(self.get_size()), "current": self.tabs.get_current_page(),
                     "tabs": [self.serialize(self.tabs.get_nth_page(i)) for i in range(self.tabs.get_n_pages())]}
-            os.makedirs(os.path.dirname(SESSION_FILE), exist_ok=True)
-            with open(SESSION_FILE, "w") as f:
-                json.dump(data, f, indent=1)
         except Exception:
-            pass
+            return
+        write_file(SESSION_FILE, json.dumps(data, indent=1))
 
     def restore_session(self):
         try:
@@ -2567,6 +2787,7 @@ class Window(Gtk.ApplicationWindow):
                 return
             self.tabs.set_show_tabs(self.tabs.get_n_pages() > 1)
             self.panes_in(self.current_holder())[0].term.grab_focus()
+        self.update_on_top()
         self.update_title()
 
     def move_focus(self, dx, dy):
@@ -2595,11 +2816,26 @@ class Window(Gtk.ApplicationWindow):
 
     # ── misc ──
     def update_title(self):
-        """Header: always "Magica Terminal"; the tab labels say which character / tab is which."""
+        """Title bar: who the focused pane is and where her shell is, like the prompt (the window manager's title stays
+        "Magica Terminal"); the tab labels say which character / tab is which."""
         self.set_title("Magica Terminal")
+        if self.active:
+            self.title_who.set_text(f"{self.active.name}@magica")
+            self.title_where.set_text(self.active.where)
         self.update_tab_label()
         self.update_frames()
         self.load_css()
+
+    def all_panes(self):
+        return [p for i in range(self.tabs.get_n_pages()) for p in self.panes_in(self.tabs.get_nth_page(i))]
+
+    def update_on_top(self):
+        """The window stays above the others while any pane has the notepad open (where the window manager allows it;
+        GNOME on Wayland doesn't)."""
+        on = any(p.notes for p in self.all_panes())
+        if on != self.on_top:
+            self.on_top = on
+            self.set_keep_above(on)
 
     def update_frames(self):
         for i in range(self.tabs.get_n_pages()):
@@ -2624,6 +2860,8 @@ class Window(Gtk.ApplicationWindow):
         for i in range(self.tabs.get_n_pages()):
             for p in self.panes_in(self.tabs.get_nth_page(i)):
                 p.term.set_font_scale(scale)
+                if p.notes:
+                    p.notes.restyle()
 
     def on_key(self, _, event):
         state = event.state & Gtk.accelerator_get_default_mod_mask()
@@ -2634,6 +2872,15 @@ class Window(Gtk.ApplicationWindow):
         if state == ctrl | shift and key == Gdk.KEY_w and self.active and self.active.space and self.get_focus() and \
                 self.get_focus().is_ancestor(self.active.space):   # closes the `space` view, not the pane
             self.active.close_space()
+            return True
+        noting = self.active and self.active.notes and self.get_focus() and \
+            self.get_focus().is_ancestor(self.active.notes)
+        if state == ctrl | shift and noting and key in (Gdk.KEY_w, Gdk.KEY_c, Gdk.KEY_v, Gdk.KEY_f):
+            view = self.active.notes.view   # Ctrl+Shift+W closes the notepad, not the pane; copy / paste are its own
+            if key == Gdk.KEY_w:
+                self.active.close_notes()
+            elif key in (Gdk.KEY_c, Gdk.KEY_v):
+                view.emit("copy-clipboard" if key == Gdk.KEY_c else "paste-clipboard")
             return True
         if state == ctrl | shift and browsing and key in (Gdk.KEY_w, Gdk.KEY_c, Gdk.KEY_v, Gdk.KEY_f):
             if key == Gdk.KEY_w:   # closes the page, not the pane; copy / paste / find are the page's own
@@ -2691,15 +2938,16 @@ class App(Gtk.Application):
     def do_activate(self):
         # `magica-terminal CMD ARGS…` or `magica-terminal -e CMD ARGS…` runs CMD in the first pane (xdg-terminal-exec)
         args = sys.argv[1:]
-        crush = args[:1] == ["--crush"]   # open the game in the first pane (for trying it out)
-        if crush:
+        overlay = args[0] if args[:1] in (["--crush"], ["--note"]) else None   # open the game / notepad in the first pane
+        if overlay:
             args = args[1:]
         if args[:1] in (["-e"], ["--"]):
             args = args[1:]
         win = Window(self, command=args or None)
         win.show_all()
-        if crush:
-            GLib.idle_add(lambda: win.panes_in(win.current_holder())[0].open_game() and False)
+        if overlay:
+            pane = win.panes_in(win.current_holder())[0]
+            GLib.idle_add(lambda: (pane.open_game() if overlay == "--crush" else pane.open_notes()) and False)
 
 
 def set_process_name(name):
@@ -2714,11 +2962,12 @@ def set_process_name(name):
 
 
 if __name__ == "__main__":
-    if sys.argv[1:2] == ["--crush"] and os.environ.get("MAGICA_CHAR"):
-        # run from inside a Magica Terminal pane: open the game in that pane (like `crush`), not in a new window
+    if sys.argv[1:2] in (["--crush"], ["--note"]) and os.environ.get("MAGICA_CHAR"):
+        # run from inside a Magica Terminal pane: open the game / notepad in that pane (like `crush` / `note`), not in a
+        # new window
         try:
             with open("/dev/tty", "w") as tty:
-                tty.write("\033]0;magica:crush\007")
+                tty.write(f"\033]0;magica:{sys.argv[1][2:]}\007")
             sys.exit(0)
         except OSError:
             pass
