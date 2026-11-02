@@ -40,8 +40,8 @@ else (without the shell integration). `shell/magica.ps1` is dot-sourced after yo
 
 - Settings are the constants at the top of `renderer.js`; those wrapped in `setting()` can be overridden in
   `%APPDATA%\magica-terminal\settings.json` by their lower-case names. The shell, config folder and window live in `main.js`.
-- The window draws its own title bar (her colour and the current folder). On Windows 11 it uses Mica, so the desktop
-  shows faintly through: `"glass"` in settings.json sets how solid the backgrounds stay (default 0.8, 1 = solid),
+- The window draws its own title bar (her colour and the current folder). On Windows 11 it uses acrylic, so the windows behind
+  show blurred through: `"glass"` in settings.json sets how solid the backgrounds stay (default 0.6, 1 = solid),
   `"mica": false` turns it off.
 - Config and session are in `%APPDATA%\magica-terminal\`, Magica Crush's best score in `crush.json` there.
 - `--crush` always opens a new window; inside a pane, type `crush` instead.

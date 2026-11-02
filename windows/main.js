@@ -201,16 +201,16 @@ ipcMain.on('quit-empty', e => {
 });
 
 // The title bar is drawn by the page (index.html #titlebar); Windows still draws the minimise / maximise / close
-// buttons over its right end (so Snap Layouts work), in the theme's colours. With mica (Windows 11), the desktop
-// shows faintly through the window: the page's backgrounds are translucent (GLASS in renderer.js).
+// buttons over its right end (so Snap Layouts work), in the theme's colours. With acrylic (Windows 11), the windows behind
+// show blurred through this one: the page's backgrounds are translucent (GLASS in renderer.js).
 const TITLEBAR_HEIGHT = 36;   // px, = #titlebar's height in style.css
-const SYMBOLS = { dark: '#e9dfcc', light: '#4a3f36' };   // button glyphs: the themes' text colours
-const BACKGROUNDS = { dark: '#24201c', light: '#f6efe1' };
+const SYMBOLS = { dark: '#efe3cc', light: '#4a3f36' };   // button glyphs: the themes' text colours
+const BACKGROUNDS = { dark: '#2b231c', light: '#f6efe1' };
 const useMica = () => readSettings().mica !== false && process.platform === 'win32'
   && parseInt(os.release().split('.')[2], 10) >= 22000;   // Windows 11
 
 function applyWindowTheme(win, theme) {
-  nativeTheme.themeSource = theme;   // mica's own tint follows the app's light / dark, not Windows'
+  nativeTheme.themeSource = theme;   // acrylic's own tint follows the app's light / dark, not Windows'
   try { win.setTitleBarOverlay({ color: '#00000000', symbolColor: SYMBOLS[theme], height: TITLEBAR_HEIGHT }); } catch {}
 }
 
@@ -224,7 +224,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width, height, title: 'Magica Terminal', show: false,
     backgroundColor: mica ? '#00000000' : BACKGROUNDS[theme],
-    backgroundMaterial: mica ? 'mica' : undefined,
+    backgroundMaterial: mica ? 'acrylic' : undefined,   // acrylic: blurs the windows behind, not just the wallpaper
     titleBarStyle: 'hidden',
     titleBarOverlay: { color: '#00000000', symbolColor: SYMBOLS[theme], height: TITLEBAR_HEIGHT },
     webPreferences: { preload: path.join(__dirname, 'preload.js') },

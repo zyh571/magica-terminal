@@ -1,7 +1,7 @@
 /* Colours come from renderer.js (--bg, --fg, --dim, --accent) so light / dark switches in place. */
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); }
 body { display: flex; flex-direction: column; font: 13px "Segoe UI", sans-serif; }
-/* mica (Windows 11): only the title bar, tabs and panes have (translucent) backgrounds, so the desktop shows through */
+/* acrylic (Windows 11): only the title bar, tabs and panes have (translucent) backgrounds, so the windows behind show through */
 body.mica, html:has(body.mica) { background: transparent; }
 
 /* our own title bar (main.js hides Windows'); Windows draws its buttons over the right end, so leave room for them.

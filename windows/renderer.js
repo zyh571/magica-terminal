@@ -64,9 +64,9 @@ const TEXT_SATURATION = setting('TEXT_SATURATION', 0.55);   // her colour at thi
 const PATH_SATURATION = setting('PATH_SATURATION', 0.4);
 const CHAR_SLOTS = 100;         // palette slots 100…117: per character name / text / path colours, 118: red accent
 const RED_SLOT = 118;
-// Windows 11 mica: the desktop shows faintly through the window. GLASS is how opaque the backgrounds stay over it
+// Windows 11 acrylic: the windows behind show blurred through this one. GLASS is how opaque the backgrounds stay over it
 // (1 = solid); "mica": false in settings.json turns it off (main.js reads that one).
-const GLASS = setting('GLASS', 0.8);
+const GLASS = setting('GLASS', 0.6);
 setting('MICA', true);
 const FOCUS_TINT = setting('FOCUS_TINT', 0.08);        // focused pane background: this much of her colour mixed in (when a tab has several panes)
 
@@ -88,8 +88,8 @@ const ALL_CHARACTERS = [...CHARACTERS, KYUBEY];
 for (const key of Object.keys(magica.settings)) if (!usedSettings.has(key)) console.warn(`settings.json: unknown setting "${key}"`);
 
 const THEMES = {   // creamy palettes: cocoa with cream text on dark, warm cream with brown text on light
-  dark: { bg: '#24201c', fg: '#e9dfcc', dim: '#8c8273', selFg: '#1f1b17', palette: [
-    '#332d27', '#d27a68', '#9cad7a', '#dcb468', '#8ca3bd', '#c095ae', '#8db5a8', '#d9cfbd',
+  dark: { bg: '#2b231c', fg: '#efe3cc', dim: '#93846f', selFg: '#1f1b17', palette: [
+    '#3a3029', '#d27a68', '#9cad7a', '#dcb468', '#8ca3bd', '#c095ae', '#8db5a8', '#d9cfbd',
     '#75695c', '#e3917f', '#b2c38f', '#ecc982', '#a4b9cf', '#d2abc1', '#a5c9bc', '#f5ecdc'] },
   light: { bg: '#f6efe1', fg: '#4a3f36', dim: '#a39886', selFg: '#fbf7ee', palette: [
     '#3b322b', '#a8493c', '#5f7a43', '#8e6a1d', '#4b6684', '#8a5878', '#4b7a70', '#b4a993',
@@ -676,7 +676,7 @@ class MagicaWindow {
     document.documentElement.style.colorScheme = this.theme;
   }
 
-  glass(hex) {   // a background colour, translucent over mica
+  glass(hex) {   // a background colour, translucent over acrylic
     return this.mica ? hex + Math.round(GLASS * 255).toString(16).padStart(2, '0') : hex;
   }
 
