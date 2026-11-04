@@ -37,7 +37,8 @@ In the shell:
   the prompt.
 - `note` opens the notepad over that pane: one plain sheet in the theme and her colour. It saves as you type to
   `~/.config/magica-terminal/note.txt` (Ctrl+S saves now, Ctrl+Z / Ctrl+Shift+Z undo / redo) and Esc goes back to the
-  prompt. While it's open the window stays on top of other windows, so a small window works as a sticky note. GNOME on
+  prompt. `<head>Title<head>` makes a header (a bit larger, bold, underlined) and `*word*` makes a word bold; the
+  tags stay hidden unless the cursor is on them, and the headers are listed down the left to jump to. While it's open the window stays on top of other windows, so a small window works as a sticky note. GNOME on
   Wayland doesn't let windows keep themselves on top, so `install.sh` adds a small GNOME Shell extension
   (`gnome-extension/`) that does it for her; log out and back in once to load it. `note buy milk` adds a line to it without opening it;
   `magica-terminal --note` opens a window with the notepad in its first pane.

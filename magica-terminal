@@ -25,7 +25,7 @@ Logins and cookies are kept in ~/.local/share/magica-terminal/web.
 Typing `space [folder]` shows what takes up the disk there: every item with a bar for its size, biggest first. Click a
 folder (or ..) to go into it, double-click a file to open it; Backspace goes up, C cds the shell there, Esc / q goes back.
 Typing `note` opens the notepad over that pane (~/.config/magica-terminal/note.txt; saves as you type, Esc goes back,
-Ctrl+Z / Ctrl+Shift+Z undo / redo); the window stays above the others while it's open. `note buy milk` adds a line to it.
+Ctrl+Z / Ctrl+Shift+Z undo / redo; <head>Title<head> headers, listed on the left, and *bold*); the window stays above the others while it's open. `note buy milk` adds a line to it.
 `magica-terminal --note` opens it like --crush. The title bar shows the focused pane's name@magica and her shell's folder.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
@@ -1789,6 +1789,15 @@ def home_path(path):
     return path
 
 
+NOTE_HEAD = re.compile(r"<head>([^\n]+?)</?head>")                     # <head>Title<head> (or </head>): a header
+NOTE_BOLD = re.compile(r"(?<![\w*])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![\w*])")   # *bold*, not "* bullet" or 2*3*4
+
+
+def note_marks(text):
+    """The notepad's markup in text: (headers, bold words), each a list of (start, end, inner start, inner end)."""
+    return ([(m.start(), m.end(), m.start(1), m.end(1)) for m in rx.finditer(text)] for rx in (NOTE_HEAD, NOTE_BOLD))
+
+
 class Notes(Gtk.Overlay):
     """`note`: one plain sheet over a pane's terminal, in the theme and the pane's colour (see Pane.open_notes). The note
     is a plain-text file, NOTE_FILE; it saves as you type and Esc goes back to the prompt. While it's open the window
@@ -1809,7 +1818,26 @@ class Notes(Gtk.Overlay):
         self.buffer = self.view.get_buffer()
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.add(self.view)
-        self.add(scroller)
+        # the headers down the left (hidden while there are none); clicking one goes to it
+        self.side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=14, margin_bottom=14)
+        self.side.get_style_context().add_class("magica-notes-side")
+        self.side_scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, propagate_natural_width=True)
+        self.side_scroll.add(self.side)
+        self.side_scroll.set_no_show_all(True)
+        self.side.show()
+        body = Gtk.Box()
+        body.pack_start(self.side_scroll, False, False, 0)
+        body.pack_start(scroller, True, True, 0)
+        self.add(body)
+        self.heads, self._titles, self._refresh, self._jump = [], None, None, None
+        # markup (see note_marks): the tags around a header or bold word are hidden unless the cursor is on it
+        # (not GTK's invisible text: GTK 3 aborts mapping the mouse onto a line that has some, "Byte index .. is off the
+        # end of the line"; tiny and transparent instead, so the layout still holds every character)
+        self.hide_tag = self.buffer.create_tag(None, size=1, foreground_rgba=rgba("#000000", 0.0))
+        self.dim_tag = self.buffer.create_tag(None)
+        self.head_tag = self.buffer.create_tag(None, weight=Pango.Weight.BOLD, underline=Pango.Underline.SINGLE, scale=1.2)
+        self.bold_tag = self.buffer.create_tag(None, weight=Pango.Weight.BOLD)
+        self.jump_mark = self.buffer.create_mark(None, self.buffer.get_start_iter(), True)
         self.hint = Gtk.Label(label="Start typing.", halign=Gtk.Align.START, valign=Gtk.Align.START,
                               margin_start=24, margin_top=18)
         self.hint.get_style_context().add_class("magica-notes-hint")
@@ -1819,8 +1847,8 @@ class Notes(Gtk.Overlay):
         self.status.get_style_context().add_class("magica-notes-status")
         self.add_overlay(self.status)
         self.set_overlay_pass_through(self.status, True)
-        for w in (self, scroller, self.view, self.hint, self.status):
-            w.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
+        for w in (self, scroller, self.view, self.hint, self.status, body, self.side_scroll, self.side):
+            self.styled(w)
         self.restyle()
 
         # GTK 3's text view has no undo: keep whole-text snapshots, one per burst of typing (it's one small note)
@@ -1832,8 +1860,10 @@ class Notes(Gtk.Overlay):
         self.hint.set_no_show_all(True)
         self.hint.set_visible(not self.shown)
         self.buffer.connect("changed", self.on_changed)
+        self.buffer.connect("mark-set", lambda b, _, mark: mark in (b.get_insert(), b.get_selection_bound()) and self.later())
         self.view.connect("key-press-event", self.on_key)
-        self.connect("destroy", lambda *_: self.save())
+        self.connect("destroy", self.on_destroy)
+        self.refresh()
         GLib.idle_add(lambda: self.view.scroll_to_mark(self.buffer.get_insert(), 0, False, 0, 0) and False)
 
     def restyle(self):
@@ -1849,6 +1879,12 @@ class Notes(Gtk.Overlay):
             textview text selection {{ background-color: {colour}; color: {t['bg']}; }}
             .magica-notes-hint {{ background: none; color: {t['dim']}; font-family: {css_families(font)}; font-size: {pt:.1f}pt; }}
             .magica-notes-status {{ background: none; color: #d9566c; font-size: 0.85em; }}
+            .magica-notes-side {{ border-right: 1px solid {mix(t['bg'], t['dim'], 0.35)}; padding: 0 6px; }}
+            button.magica-notes-head {{ background: none; border: none; box-shadow: none; padding: 3px 10px; min-height: 0; }}
+            button.magica-notes-head label {{ background: none; color: {t['dim']}; font-family: {css_families(font)};
+                font-size: {pt * 0.9:.1f}pt; }}
+            button.magica-notes-head:hover label {{ color: {t['fg']}; }}
+            button.magica-notes-head.current label {{ color: {colour}; }}
             scrollbar, scrollbar trough {{ background: none; border: none; }}
             scrollbar slider {{ background-color: {mix(t['bg'], t['dim'], 0.45)}; border: none; min-width: 6px; }}
         """
@@ -1857,6 +1893,90 @@ class Notes(Gtk.Overlay):
             self.css.load_from_data(css.encode())
             self.view.set_pixels_below_lines(gap)
             self.view.set_pixels_inside_wrap(gap)
+            self.dim_tag.set_property("foreground", t['dim'])
+
+    def styled(self, widget):
+        widget.get_style_context().add_provider(self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 2)
+        return widget
+
+    def later(self):
+        """Redo the markup and headers once the current change or cursor move is done (before the next redraw)."""
+        if not self._refresh:
+            self._refresh = GLib.idle_add(self.refresh, priority=GLib.PRIORITY_HIGH_IDLE)
+
+    def refresh(self):
+        self._refresh = None
+        b, text = self.buffer, self.text()
+        start, end = b.get_bounds()
+        for tag in (self.hide_tag, self.dim_tag, self.head_tag, self.bold_tag):
+            b.remove_tag(tag, start, end)
+        cur, sel = (b.get_iter_at_mark(m).get_offset() for m in (b.get_insert(), b.get_selection_bound()))
+        lo, hi = min(cur, sel), max(cur, sel)
+        at = b.get_iter_at_offset
+        heads, bolds = note_marks(text)
+        for spans, tag in ((heads, self.head_tag), (bolds, self.bold_tag)):
+            for s, e, i, j in spans:
+                b.apply_tag(tag, at(s if tag is self.head_tag else i), at(e if tag is self.head_tag else j))
+                marks = self.dim_tag if lo <= e and hi >= s else self.hide_tag   # (shown, dimmed, while editing it)
+                b.apply_tag(marks, at(s), at(i))
+                b.apply_tag(marks, at(j), at(e))
+        self.heads = heads
+        titles = [text[i:j].strip() or "…" for _, _, i, j in heads]
+        if titles != self._titles:
+            self._titles = titles
+            for child in self.side.get_children():
+                child.destroy()
+            for n, title in enumerate(titles):
+                label = self.styled(Gtk.Label(label=title, xalign=0, ellipsize=Pango.EllipsizeMode.END, max_width_chars=20))
+                button = self.styled(Gtk.Button(relief=Gtk.ReliefStyle.NONE, can_focus=False, tooltip_text=title))
+                button.get_style_context().add_class("magica-notes-head")
+                button.add(label)
+                button.connect("clicked", lambda _, n=n: self.jump(n))
+                self.side.pack_start(button, False, False, 0)
+            self.side.show_all()
+            self.side_scroll.set_visible(bool(titles))
+        here = sum(1 for s, *_ in heads if s <= cur) - 1   # the section the cursor is in
+        for n, button in enumerate(self.side.get_children()):
+            (button.get_style_context().add_class if n == here else button.get_style_context().remove_class)("current")
+        return False
+
+    def jump(self, n):
+        """A header from the left: it goes to the top, the cursor to the line under it (so it stays a header)."""
+        if n >= len(self.heads):
+            return
+        s, e, *_ = self.heads[n]
+        b = self.buffer
+        b.move_mark(self.jump_mark, b.get_iter_at_offset(s))
+        below = b.get_iter_at_offset(e)
+        below.forward_line()
+        b.place_cursor(below)
+        self.view.grab_focus()
+        # GTK's own scroll is only roughly right: it goes by guessed heights for lines it hasn't laid out yet (long
+        # wrapped ones especially) and lands ~top_margin too far. So it brings the header near, then settle_jump puts
+        # its line where the note's first line sits, once the lines there are measured.
+        self.view.scroll_to_mark(self.jump_mark, 0, True, 0, 0)
+        if self._jump:
+            GLib.source_remove(self._jump)
+        self._jump_tries = 0
+        self._jump = GLib.idle_add(self.settle_jump)   # (default idle: after GTK lays the lines out and draws)
+
+    def settle_jump(self):
+        adj = self.view.get_vadjustment()
+        y, _ = self.view.get_line_yrange(self.buffer.get_iter_at_mark(self.jump_mark))
+        want = min(max(y, adj.get_lower()), adj.get_upper() - adj.get_page_size())   # (the last ones can't reach the top)
+        self._jump_tries += 1
+        if abs(adj.get_value() - want) < 1 or self._jump_tries > 20:
+            self._jump = None
+            return False
+        adj.set_value(want)
+        return True   # again next idle: laying out the lines now in view can still move it
+
+    def on_destroy(self, *_):
+        for source in (self._refresh, self._jump):
+            if source:
+                GLib.source_remove(source)
+        self._refresh = self._jump = None
+        self.save()
 
     def load(self):
         try:
@@ -1890,6 +2010,7 @@ class Notes(Gtk.Overlay):
         self.shown = text
         self.hint.set_visible(not text)
         self.dirty = True
+        self.later()
         if self._timer:
             GLib.source_remove(self._timer)
         self._timer = GLib.timeout_add(int(NOTE_SAVE_AFTER * 1000), self.on_timer)
