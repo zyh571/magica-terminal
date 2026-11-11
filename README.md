@@ -98,8 +98,10 @@ Changes apply to new windows. Unknown names and bad values are ignored with a wa
 Settings, the theme, the session, the note and Crush's best score are saved through a temporary file renamed over the
 old one, so a crash mid-save never leaves a half-written file.
 
-Closing the window saves tabs, splits, characters and folders to `~/.config/magica-terminal/session.json`; the
-next launch restores them.
+Closing the window saves tabs, splits, characters, folders and what's in each pane (its last 2000 lines, as plain
+text, no colours) to `~/.config/magica-terminal/session.json` (readable only by you, since that text can hold
+secrets); the next launch restores them, each pane's old text above a faint "restored" line and a fresh prompt.
+A full-screen app open at the time (vim, Claude Code) comes back as a copy of its last screen.
 
 ## Windows
 

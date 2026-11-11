@@ -31,8 +31,9 @@ Typing `attach [--freeze] [name]` puts another app's window (a QEMU display, say
 its title or app) over that pane, under a bar, until ✕ / Ctrl+Shift+W or it closes; F or the lock freezes it (watch only).
 GNOME only: the Shell extension in gnome-extension/ places it. The title bar shows the focused pane's name@magica and her shell's folder.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
-Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
-next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
+Closing the window saves its tabs, splits, characters, folders and each pane's text (the last 2000 lines, without
+colours; ~/.config/magica-terminal/session.json, readable only by you); the next launch restores them, the text above a
+faint "restored" line, unless another Magica Terminal is open. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
 A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
@@ -77,6 +78,7 @@ FIGURES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "figures")  
 THEME_FILE = os.path.expanduser("~/.config/magica-terminal/theme")   # "light", "dark" or "system"
 COLORS_FILE = os.path.expanduser("~/.config/magica-terminal/colors.sh")   # prompt colours for ~/.bashrc
 SESSION_FILE = os.path.expanduser("~/.config/magica-terminal/session.json")   # tabs / splits saved on close
+HISTORY_LINES = 2000      # how much of each pane's text the session keeps (the last lines)
 FONT = "Maple Mono, Ubuntu Sans Mono 11"   # Maple Mono (soft, rounded; ./install.sh fetches it), else Ubuntu's
 PADDING = 10              # px around the text
 
@@ -218,13 +220,17 @@ THEMES = {   # creamy palettes: cocoa with cream text on dark, warm cream with b
 }
 
 
-def write_file(path, text):
+def write_file(path, text, private=False):
     """Write a whole file so a crash or power cut mid-save leaves either the old contents or the new, never half: write a
-    temporary file next to it, flush it to disk, then rename it over the original. Returns whether it worked."""
+    temporary file next to it, flush it to disk, then rename it over the original. Returns whether it worked.
+    private: only you can read it (0600 from the start)."""
     tmp = f"{path}.{os.getpid()}.tmp"   # (per process: two windows saving at once don't share one)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(tmp, "w") as f:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600 if private else 0o666)
+        with open(fd, "w") as f:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
@@ -302,6 +308,16 @@ def set_ratio(paned, ratio):
             paned.disconnect(handler)
             paned.set_position(round(size * ratio))
     handler = paned.connect("size-allocate", apply)
+
+
+def restored_text(history):
+    """What a restored pane shows first: the text it had (plain, no colours; control characters dropped, since anything
+    could be in the file) and a faint line under it, then the new shell's prompt."""
+    text = "".join(c for c in history if c in "\n\t" or not (ord(c) < 32 or 127 <= ord(c) < 160))
+    lines = text.rstrip().split("\n")[-HISTORY_LINES:]
+    if not lines or lines == [""]:
+        return b""
+    return ("\r\n".join(lines) + "\r\n\033[2m── restored ──\033[0m\r\n").encode()
 
 
 def other_instance_running():
@@ -2241,7 +2257,7 @@ class Notes(Gtk.Overlay):
 class Pane(Gtk.Overlay):
     """One terminal over a backdrop with its character's figure."""
 
-    def __init__(self, app_window, cwd=None, command=None, character=None):
+    def __init__(self, app_window, cwd=None, command=None, character=None, history=None):
         super().__init__()
         self.win = app_window
         self.game = None          # the `crush` game while it's open over this pane
@@ -2342,6 +2358,9 @@ class Pane(Gtk.Overlay):
             self._idle_id = GLib.timeout_add(int(random.uniform(*IDLE_EVERY) * 1000), self.idle_tick)
             self.connect("destroy", lambda *_: GLib.source_remove(self._idle_id))
         self.set_focused(False)
+
+        if history:   # the text it had when the window closed (session.json), above the new shell
+            self.term.feed(restored_text(history))
 
         shell = os.environ.get("SHELL", "/bin/bash")
         self.pid = None
@@ -2615,6 +2634,17 @@ class Pane(Gtk.Overlay):
             return os.readlink(f"/proc/{self.pid}/cwd")
         except Exception:
             return None
+
+    def history_text(self):
+        """Its text, scrollback and screen (the last HISTORY_LINES lines), for the session to show again next time.
+        Plain text: VTE only hands back colours as HTML. A full-screen app (vim, Claude Code) gives its screen."""
+        try:
+            adj = self.term.get_vadjustment()
+            text, _ = self.term.get_text_range_format(Vte.Format.TEXT, int(adj.get_lower()), 0,
+                                                      int(adj.get_upper()) - 1, self.term.get_column_count())
+        except Exception:
+            return ""
+        return "\n".join((text or "").rstrip().split("\n")[-HISTORY_LINES:])
 
     def apply_palette(self):
         pal = xterm256(self.theme["palette"])
@@ -3087,7 +3117,7 @@ class Window(Gtk.ApplicationWindow):
     # ── session ──
     def serialize(self, widget):
         if isinstance(widget, Pane):
-            return {"char": widget.name, "cwd": widget.cwd()}
+            return {"char": widget.name, "cwd": widget.cwd(), "text": widget.history_text()}
         if isinstance(widget, Gtk.Paned):
             a = widget.get_allocation()
             horizontal = widget.get_orientation() == Gtk.Orientation.HORIZONTAL
@@ -3101,7 +3131,7 @@ class Window(Gtk.ApplicationWindow):
         if "char" in node:
             cwd = node.get("cwd")
             char = character_named(node["char"]) if node["char"] != "kyubey" else None   # root shells aren't restored
-            return Pane(self, cwd if cwd and os.path.isdir(cwd) else None, character=char)
+            return Pane(self, cwd if cwd and os.path.isdir(cwd) else None, character=char, history=node.get("text"))
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL if node["orient"] == "h" else Gtk.Orientation.VERTICAL)
         paned.pack1(self.deserialize(node["a"]), True, True)
         paned.pack2(self.deserialize(node["b"]), True, True)
@@ -3114,7 +3144,7 @@ class Window(Gtk.ApplicationWindow):
                     "tabs": [self.serialize(self.tabs.get_nth_page(i)) for i in range(self.tabs.get_n_pages())]}
         except Exception:
             return
-        write_file(SESSION_FILE, json.dumps(data, indent=1))
+        write_file(SESSION_FILE, json.dumps(data, indent=1), private=True)   # (the panes' text may hold secrets)
 
     def restore_session(self):
         try:
