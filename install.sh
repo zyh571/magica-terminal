@@ -29,7 +29,8 @@ if [ -z "$(fc-list "Maple Mono")" ]; then
   rm -rf "$tmp"
 fi
 
-# GNOME on Wayland won't let a window keep itself on top; this small GNOME Shell extension does it for the notepad.
+# GNOME on Wayland won't let a window keep itself on top or place another app's window; this small GNOME Shell extension
+# does both (the notepad on top, `attach`).
 # GNOME Shell only finds a new extension when it starts, so on Wayland it works after you log out and back in.
 EXT="magica-terminal@dev.local"
 if command -v gnome-shell >/dev/null; then
@@ -39,7 +40,7 @@ if command -v gnome-shell >/dev/null; then
   if [[ "$enabled" != *"'$EXT'"* ]]; then
     if [[ "$enabled" == *"[]"* ]]; then new="['$EXT']"; else new="${enabled%]}, '$EXT']"; fi
     gsettings set org.gnome.shell enabled-extensions "$new"
-    echo "enabled the GNOME Shell extension $EXT (keeps the notepad on top; log out and back in to load it)"
+    echo "enabled the GNOME Shell extension $EXT (notepad on top, attach; log out and back in to load it)"
   fi
 fi
 

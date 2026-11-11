@@ -18,7 +18,7 @@ Everything is linked back to this folder, so edits here show up in new windows. 
 | Keys | |
 |---|---|
 | Ctrl+Shift+O / E | split right / down |
-| Ctrl+Shift+W | close pane |
+| Ctrl+Shift+W | close pane (or the `browser` page, `space` view or `attach`ed window over it) |
 | Ctrl+Alt+Arrows | move between panes |
 | Ctrl+Shift+T, Ctrl+PageUp/Down | new tab, switch tabs |
 | Ctrl+1…8 / Ctrl+9 | go to tab N / last tab |
@@ -48,6 +48,13 @@ In the shell:
 - `space [folder]` shows what takes up the disk there (Linux only): every item with a bar for its size, biggest
   first, filling in while it scans. Click a folder (or `..`) to go into it, double-click a file to open it;
   Backspace goes up (past where you started, too), C cds the shell into the folder on show, Esc or q goes back.
+- `attach` puts another app's window (a QEMU display, say) over that pane (GNOME only): the mouse turns into a crosshair;
+  click the window. `attach qemu` takes the latest window whose title or app has "qemu" in it instead. It sits under a
+  small bar with its title, moves and resizes with the pane, comes to the front with the terminal, and is minimized while
+  its tab isn't showing. F or the lock button (or `attach --freeze …`) freezes it: you can watch it, but clicks on it and
+  focus go back to the terminal. ✕ or Ctrl+Shift+W puts it back where it was; closing it closes the bar. Placing another
+  app's window needs the GNOME Shell extension (`install.sh` adds it; after updating, log out and back in once). If QEMU
+  has grabbed the mouse, Ctrl+Alt+G lets go of it; `-display gtk,zoom-to-fit=on` scales the guest to the pane.
 - In a folder with a `.env`, its `KEY=value` lines are set in the shell (the first time, she asks; `y` / `n` is
   remembered per folder in `~/.config/magica-terminal/env-trust`, delete its line to be asked again). Leaving the
   folder, into a subfolder too, puts every key back as it was. The file is only read, never run; editing it while
@@ -103,3 +110,4 @@ next launch restores them.
 - `shell/root-prompt.sh`: Kyubey's root prompt, to append to `/root/.bashrc`
 - `figures/`: one PNG per character
 - `magica-terminal.desktop`: launcher template used by `install.sh`
+- `gnome-extension/`: the GNOME Shell helper (keeps the notepad on top, places `attach`ed windows)

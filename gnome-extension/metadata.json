@@ -1,7 +1,7 @@
 {
   "uuid": "magica-terminal@dev.local",
-  "name": "Magica Terminal: keep on top",
-  "description": "Lets Magica Terminal keep its own window above the others while the notepad is open (GNOME on Wayland doesn't let apps do that themselves).",
+  "name": "Magica Terminal helper",
+  "description": "Lets Magica Terminal keep its window above the others while the notepad is open, and glue another app's window over a pane for `attach` (GNOME on Wayland doesn't let apps do either themselves).",
   "shell-version": ["45", "46", "47", "48", "49", "50"],
   "url": "https://github.com/zyh571/magica-terminal"
 }

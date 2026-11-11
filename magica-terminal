@@ -7,7 +7,7 @@ colour. Unfocused panes keep their colours, just less saturated.
 
 Keys
   Ctrl+Shift+O / Ctrl+Shift+E   split right / split down
-  Ctrl+Shift+W                  close pane (or the `browser` page / `space` view over it)
+  Ctrl+Shift+W                  close pane (or the `browser` page / `space` view / `attach`ed window over it)
   Ctrl+Alt+Arrows               move focus between panes
   Ctrl+Shift+T                  new tab          Ctrl+PageUp / PageDown   previous / next tab
   Ctrl+Shift+C / Ctrl+Shift+V   copy / paste
@@ -26,7 +26,10 @@ Typing `space [folder]` shows what takes up the disk there: every item with a ba
 folder (or ..) to go into it, double-click a file to open it; Backspace goes up, C cds the shell there, Esc / q goes back.
 Typing `note` opens the notepad over that pane (~/.config/magica-terminal/note.txt; saves as you type, Esc goes back,
 Ctrl+Z / Ctrl+Shift+Z undo / redo; <head>Title<head> headers, listed on the left, and *bold*); the window stays above the others while it's open. `note buy milk` adds a line to it.
-`magica-terminal --note` opens it like --crush. The title bar shows the focused pane's name@magica and her shell's folder.
+`magica-terminal --note` opens it like --crush.
+Typing `attach [--freeze] [name]` puts another app's window (a QEMU display, say; click it, or the latest one with name in
+its title or app) over that pane, under a bar, until ✕ / Ctrl+Shift+W or it closes; F or the lock freezes it (watch only).
+GNOME only: the Shell extension in gnome-extension/ places it. The title bar shows the focused pane's name@magica and her shell's folder.
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
@@ -1779,6 +1782,188 @@ class SpaceView(Gtk.Box):
         return True
 
 
+# ── attach: another app's window (a QEMU display, say) glued over a pane (`attach [--freeze] [name]` in the shell) ──
+# GNOME on Wayland doesn't let one app place another's window, so the GNOME Shell extension (gnome-extension/) does it:
+# the window is kept over the pane, below a small bar, moving and resizing with it and minimized while its tab isn't
+# showing. Frozen, it can be watched but not touched: clicks on it and focus go back to the terminal.
+SHELL_HELPER = ("org.gnome.Shell", "/dev/local/MagicaTerminal", "dev.local.MagicaTerminal")
+_attach_keys = itertools.count(1)
+_attached = {}   # key → AttachView, for the extension's Gone signal
+
+
+def attach_args(text):
+    """`attach` arguments → (frozen, window name or "" to pick one by clicking)."""
+    try:
+        words = shlex.split(text)
+    except ValueError:
+        words = text.split()
+    frozen = any(w in ("-f", "--freeze") for w in words)
+    return frozen, " ".join(w for w in words if w not in ("-f", "--freeze"))
+
+
+def helper_error(error):
+    """A failed call to the GNOME Shell extension → what to tell the user."""
+    if any(s in error for s in ("UnknownMethod", "UnknownObject", "UnknownInterface", "No such", "ServiceUnknown")):
+        return ("attach needs Magica Terminal's GNOME Shell extension (GNOME only), up to date: run ./install.sh, "
+                "then log out and back in")
+    return f"attach: {error}"
+
+
+def on_helper_signal(conn, sender, path, iface, signal, params):
+    if signal == "Gone":
+        view = _attached.get(params.unpack()[0])
+        if view:
+            view.gone()
+
+
+class AttachView(Gtk.Box):
+    """`attach`: a bar (the window's title, freeze, detach) over the space the attached window fills (see Pane.open_attach)."""
+
+    def __init__(self, pane, frozen):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, can_focus=True)
+        self.pane = pane
+        self.key = f"{os.getpid()}:{next(_attach_keys)}"
+        self.target = None    # the window's id (the shell's), once picked or found
+        self.frozen = frozen
+        self.closed = False
+        self._sync_id = 0
+        self.get_style_context().add_class("magica-attach")
+        bar = Gtk.Box(spacing=2, margin=6)
+        self.icon = Gtk.Image.new_from_icon_name("view-pin-symbolic", Gtk.IconSize.MENU)
+        bar.pack_start(self.icon, False, False, 4)
+        self.title = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, hexpand=True)
+        self.title.get_style_context().add_class("magica-attach-title")
+        bar.pack_start(self.title, True, True, 4)
+        self.state = Gtk.Label()
+        self.state.get_style_context().add_class("magica-attach-state")
+        bar.pack_start(self.state, False, False, 4)
+        def button(icon, tip, action):
+            b = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.MENU)
+            b.set_relief(Gtk.ReliefStyle.NONE)
+            b.set_tooltip_text(tip)
+            b.set_can_focus(False)
+            b.connect("clicked", lambda *_: action())
+            bar.pack_start(b, False, False, 0)
+            return b
+        self.freeze_button = button("changes-prevent-symbolic", "", self.toggle_freeze)
+        button("window-close-symbolic", "Detach (Ctrl+Shift+W)", pane.close_attach)
+        self.pack_start(bar, False, False, 0)
+        self.hole = Gtk.Box(vexpand=True)   # the attached window covers this
+        self.hole.connect("size-allocate", lambda *_: self.sync_soon())
+        self.hole.connect("map", lambda *_: self.sync_soon())
+        self.hole.connect("unmap", lambda *_: self.sync_soon())
+        self.pack_start(self.hole, True, True, 0)
+        self.connect("key-press-event", self.on_key)
+        self.connect("destroy", lambda *_: self.detach())
+        self.title.set_text("click a window to attach it here (Esc cancels)")
+        self.show_state()
+        _attached[self.key] = self
+
+    def call(self, method, args, reply, done=None, timeout=2000):
+        app = self.pane.win.get_application()
+        conn = app.get_dbus_connection() if app else None
+        if conn is None:
+            done and done(None, "no session bus")
+            return
+        def finish(conn, res):
+            try:
+                value = conn.call_finish(res).unpack()
+            except GLib.Error as e:
+                if done:
+                    done(None, e.message)
+                return
+            if done:
+                done(value, None)
+        conn.call(*SHELL_HELPER, method, args, GLib.VariantType(reply) if reply else None, Gio.DBusCallFlags.NONE,
+                  timeout, None, finish)
+
+    def start(self, name):
+        """Find the window by name, or let the user click one."""
+        def found(value, error):
+            if self.closed:
+                return
+            if error is not None:
+                self.pane.close_attach(helper_error(error))
+            elif not value[0]:
+                self.pane.close_attach(f"no window matching “{name}”" if name else None)
+            else:
+                self.target = value[0]
+                self.title.set_text("attaching…")
+                self.sync()
+        if name:
+            self.call("Find", GLib.Variant("(s)", (name,)), "(s)", found)
+        else:
+            self.call("Pick", None, "(s)", found, timeout=GLib.MAXINT32)
+
+    def sync_soon(self):
+        if not self._sync_id and not self.closed:
+            self._sync_id = GLib.idle_add(self.sync)
+
+    def sync(self):
+        """Tell the shell where the window goes (the hole, in the window's own coordinates) and how."""
+        self._sync_id = 0
+        if self.closed or not self.target:
+            return False
+        win = self.pane.win
+        pos = self.hole.translate_coordinates(win, 0, 0) if self.hole.get_realized() else None
+        w, h = self.hole.get_allocated_width(), self.hole.get_allocated_height()
+        shown = bool(pos) and self.hole.get_mapped() and w > 1 and h > 1
+        x, y = pos or (0, 0)
+        path = f"{win.get_application().get_dbus_object_path()}/window/{win.get_id()}"
+        def placed(value, error):
+            if self.closed:
+                return
+            if error is not None:
+                self.pane.close_attach(helper_error(error))
+            elif not value[0] and shown:
+                self.gone()
+            elif value[0]:
+                self.title.set_text(value[0])
+        self.call("Attach", GLib.Variant("(sssiiiibb)", (path, self.key, self.target, x, y, max(w, 1), max(h, 1),
+                                                         shown, self.frozen)), "(s)", placed)
+        return False
+
+    def toggle_freeze(self):
+        self.frozen = not self.frozen
+        self.show_state()
+        self.sync()
+        self.grab_focus()
+
+    def show_state(self):
+        self.state.set_text("frozen · watching only" if self.frozen else "")
+        self.freeze_button.set_image(Gtk.Image.new_from_icon_name(   # a closed lock while frozen
+            "changes-prevent-symbolic" if self.frozen else "changes-allow-symbolic", Gtk.IconSize.MENU))
+        self.freeze_button.set_tooltip_text("Unfreeze: let clicks and keys through (F)" if self.frozen else
+                                            "Freeze: watch only, no clicks or keys (F)")
+        if self.frozen:
+            self.get_style_context().add_class("frozen")
+        else:
+            self.get_style_context().remove_class("frozen")
+
+    def on_key(self, _, event):
+        state = event.state & Gtk.accelerator_get_default_mod_mask()
+        if not state and event.keyval in (Gdk.KEY_f, Gdk.KEY_F):
+            self.toggle_freeze()
+            return True
+        return False
+
+    def gone(self):
+        """The window closed."""
+        self.target = None
+        self.pane.close_attach("the attached window closed")
+
+    def detach(self):
+        if self.closed:
+            return
+        self.closed = True
+        _attached.pop(self.key, None)
+        if self._sync_id:
+            GLib.source_remove(self._sync_id)
+            self._sync_id = 0
+        if self.target:
+            self.call("Detach", GLib.Variant("(s)", (self.key,)), None)
+
+
 # ── note: a notepad over the pane (`note` in the shell) ──
 
 def home_path(path):
@@ -2062,6 +2247,7 @@ class Pane(Gtk.Overlay):
         self.browser = None       # the `browser` page while it's open over this pane
         self.space = None         # the `space` view while it's open over this pane
         self.notes = None         # the `note` notepad while it's open over this pane
+        self.attached = None      # the `attach` bar while another app's window is glued over this pane
         self.where = home_path(cwd or os.getcwd() or os.path.expanduser("~"))   # her shell's folder, for the title bar
         t = THEMES[app_window.theme]
         self.theme = t
@@ -2135,6 +2321,7 @@ class Pane(Gtk.Overlay):
         self.term.connect("leave-notify-event", lambda *_: self.set_hovering(False))
 
         self.term.connect("focus-in-event", lambda *_: self.set_focused(True))
+        self.term.connect("focus-in-event", self.keep_attach_focus)
         self.term.connect("focus-out-event", lambda *_: self.set_focused(False))
         self.term.connect("child-exited", lambda *_: self.win.close_pane(self))
         self.term.connect("window-title-changed", self.on_title)
@@ -2280,6 +2467,49 @@ class Pane(Gtk.Overlay):
         self.win.update_on_top()
         self.term.grab_focus()
 
+    def open_attach(self, text):
+        """`attach [--freeze] [name]`: another app's window (picked by clicking, or the latest one whose title or app
+        has name in it) is kept over the pane, under a bar, until ✕ / Ctrl+Shift+W or it closes. --freeze (or F, or
+        the lock button) makes it watch-only."""
+        frozen, name = attach_args(text)
+        if self.attached:
+            self.close_attach()
+        app = self.win.get_application()
+        conn = app.get_dbus_connection() if app else None
+        if conn is None:
+            self.term.feed(b"\r\n\x1b[31mattach needs a D-Bus session\x1b[0m\r\n")
+            return
+        if not getattr(app, "helper_signals", None):
+            app.helper_signals = conn.signal_subscribe(SHELL_HELPER[0], SHELL_HELPER[2], "Gone", SHELL_HELPER[1], None,
+                                                       Gio.DBusSignalFlags.NONE, on_helper_signal)
+        self.attached = AttachView(self, frozen)
+        self.add_overlay(self.attached)
+        self.reorder_overlay(self.attached, 1)   # just above the terminal, under the frame and search bar
+        self.attached.connect("focus-in-event", lambda *_: self.set_focused(True))
+        self.attached.connect("focus-out-event", lambda *_: self.set_focused(False))
+        self.attached.show_all()
+        self.keep_attach_focus()   # (once it's mapped)
+        self.update_figure()
+        self.attached.start(name)
+
+    def keep_attach_focus(self, *_):
+        """Keys go to the `attach` bar (F freezes), not the shell hidden under it (focus lands on the terminal after a
+        tab switch, say)."""
+        if self.attached:
+            GLib.idle_add(lambda: self.attached and self.attached.grab_focus() and False)
+        return False
+
+    def close_attach(self, message=None):
+        """Detach: the window goes back where it was (the extension does that when the bar is destroyed)."""
+        if not self.attached:
+            return
+        self.attached.destroy()
+        self.attached = None
+        if message:
+            self.term.feed(f"\r\n\x1b[31m{message}\x1b[0m\r\n".encode())
+        self.update_figure()
+        self.term.grab_focus()
+
     def close_game(self):
         if not self.game:
             return
@@ -2345,6 +2575,10 @@ class Pane(Gtk.Overlay):
         if title.startswith("magica:space:"):   # `space [folder]` (see ~/.bashrc)
             path = title[len("magica:space:"):]
             GLib.idle_add(lambda: self.open_space(path) and False)
+            return
+        if title.startswith("magica:attach:"):   # `attach [--freeze] [name]` (see ~/.bashrc)
+            text = title[len("magica:attach:"):]
+            GLib.idle_add(lambda: self.open_attach(text) and False)
             return
         if title.startswith("magica:browser:"):   # `browser [address or search]` (see ~/.bashrc)
             text = title[len("magica:browser:"):]
@@ -2613,7 +2847,7 @@ class Pane(Gtk.Overlay):
         w, h = self.get_allocated_width(), self.get_allocated_height()
         if w <= 1 or h <= 1:
             return False
-        hidden = self.game or self.notes or self.browser and self.browser.fullscreen   # none over the game, notepad or a video
+        hidden = self.game or self.notes or self.attached or self.browser and self.browser.fullscreen   # none over the game, notepad, a window or a video
         self.img.set_visible(not hidden)
         if hidden:
             self.base.set_visible(False)
@@ -2761,6 +2995,13 @@ class Window(Gtk.ApplicationWindow):
             .magica-space .magica-space-path {{ font-weight: bold; }}
             .magica-space button {{ color: {t['dim']}; }}
             .magica-space button:hover {{ color: {t['fg']}; }}
+            .magica-attach {{ background: {t['bg']}; color: {t['fg']}; }}
+            .magica-attach .magica-attach-title {{ font-weight: bold; }}
+            .magica-attach .magica-attach-state {{ color: {accent}; }}
+            .magica-attach image {{ color: {accent}; }}
+            .magica-attach button {{ color: {t['dim']}; }}
+            .magica-attach button:hover {{ color: {t['fg']}; }}
+            .magica-attach.frozen button image {{ color: {accent}; }}
         """
         if css != getattr(self, "_css_text", None):     # reloaded on focus changes for the accent; skip if same
             self._css_text = css
@@ -3058,6 +3299,12 @@ class Window(Gtk.ApplicationWindow):
         if state == ctrl | shift and key == Gdk.KEY_w and self.active and self.active.space and self.get_focus() and \
                 self.get_focus().is_ancestor(self.active.space):   # closes the `space` view, not the pane
             self.active.close_space()
+            return True
+        focus = self.get_focus()
+        attaching = self.active and self.active.attached and focus and \
+            (focus is self.active.attached or focus.is_ancestor(self.active.attached))
+        if state == ctrl | shift and key == Gdk.KEY_w and attaching:
+            self.active.close_attach()   # detaches the window, not closes the pane
             return True
         noting = self.active and self.active.notes and self.get_focus() and \
             self.get_focus().is_ancestor(self.active.notes)
