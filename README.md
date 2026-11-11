@@ -44,7 +44,7 @@ In the shell:
   `magica-terminal --note` opens a window with the notepad in its first pane.
 - `browser [address or search]` opens a web page over that pane (Linux only, WebKitGTK). ✕ or Ctrl+Shift+W
   goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. A video's full screen
-  fills the pane (Esc leaves it). She stays in front, translucent. Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
+  fills the pane (Esc leaves it). Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
 - `space [folder]` shows what takes up the disk there (Linux only): every item with a bar for its size, biggest
   first, filling in while it scans. Click a folder (or `..`) to go into it, double-click a file to open it;
   Backspace goes up (past where you started, too), C cds the shell into the folder on show, Esc or q goes back.
@@ -59,8 +59,8 @@ In the shell:
   remembered per folder in `~/.config/magica-terminal/env-trust`, delete its line to be asked again). Leaving the
   folder, into a subfolder too, puts every key back as it was. The file is only read, never run; editing it while
   you're there reloads it at the next prompt. Linux (bash) only.
-- A character turns translucent while there's text (or a coloured cell) behind her, the more of it
-  (averaged over everything behind her), the more; `text_opacity` sets how far, `text_full` how much text it takes.
+- A character sits translucent behind the text (`figure_opacity`, 0.35). `hover_opacity` and `text_opacity` (both off
+  by default) fade her further while the mouse is over her or while there's text in front of her.
 
 Magica Crush: swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a
 striped gem (clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a

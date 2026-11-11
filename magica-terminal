@@ -2,7 +2,7 @@
 """Magica Terminal — a small VTE terminal where every pane belongs to a Puella Magi character.
 
 Each pane is a VTE terminal with a transparent background layered over a backdrop that draws the
-character's HELLO! GOOD SMILE figure in the bottom-right corner, drawn in front of the text. Text, cursor and selection use her
+character's HELLO! GOOD SMILE figure in the bottom-right corner, translucent, behind the text. Text, cursor and selection use her
 colour. Unfocused panes keep their colours, just less saturated.
 
 Keys
@@ -34,8 +34,6 @@ In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it
 Closing the window saves its tabs, splits, characters and folders (~/.config/magica-terminal/session.json); the
 next launch restores them unless another Magica Terminal is open. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
-Hovering the mouse over a figure fades it so the text behind is readable; text (or coloured cells) behind
-her solid part makes her translucent too, the more of it, the more.
 A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
 reports commands to the terminal with VTE's OSC 666 vte.shell.preexec / vte.shell.postexec=<status>.
@@ -84,8 +82,9 @@ PADDING = 10              # px around the text
 # the full-screen size while either its width or height is still full, and shrinks once both shrink.
 FIG_HEIGHT, FIG_RIGHT, FIG_BOTTOM = 240, 30, 12
 BASE_HEIGHT, BASE_GAP = 5, 4   # coloured bar under the focused pane's figure (px, 0 = off), and its gap above the bottom edge
-HOVER_OPACITY = 0.25      # figure opacity while the mouse is over it
-TEXT_OPACITY = 0.3        # …and while there's text behind her (1 = off); less text behind her, less fading
+FIGURE_OPACITY = 0.35     # figure opacity; she sits behind the text
+HOVER_OPACITY = 1         # extra fading while the mouse is over her (1 = off)
+TEXT_OPACITY = 1          # …and while there's text in front of her (1 = off); less text, less fading
 TEXT_FULL = 0.2           # …she's faded all the way once this share of what's behind her (by area) is text
 TEXT_CONTRAST = 0.12      # text counts once its colour (or its cell's) differs from the background by this much (0…1)
 FAIL_FLASH = 0.5          # s the figure and the bar under it stay tinted red after a command fails (0 = off)
@@ -157,7 +156,7 @@ ALL_CHARACTERS = CHARACTERS + [KYUBEY]
 # ~/.config/magica-terminal/settings.json overrides the constants below by their lower-case names,
 # e.g. {"idle_bob": 16, "font": "Monospace 12", "idle_every": [4, 8], "notify": false}
 SETTINGS_FILE = os.path.expanduser("~/.config/magica-terminal/settings.json")
-SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HEIGHT", "BASE_GAP", "HOVER_OPACITY",
+SETTINGS = ["FONT", "PADDING", "FIG_HEIGHT", "FIG_RIGHT", "FIG_BOTTOM", "BASE_HEIGHT", "BASE_GAP", "FIGURE_OPACITY", "HOVER_OPACITY",
             "TEXT_OPACITY", "TEXT_FULL", "TEXT_CONTRAST",
             "FAIL_FLASH", "FAIL_TINT", "FAIL_SQUASH", "FAIL_RED", "IGNORED_EXIT", "LONG_COMMAND", "HOP_HEIGHT", "HOPS",
             "JUMP_HEIGHT", "NOTIFY", "IDLE_AFTER", "IDLE_EVERY", "IDLE_BOB", "IDLE_BREATH", "FRAME_WIDTH", "WINDOW_RADIUS",
@@ -2256,7 +2255,7 @@ class Pane(Gtk.Overlay):
         self.stretch, self.widen = 1.0, 1.0   # figure height / width factors (breathing, squash)
         self.load_character(character or app_window.next_character())
 
-        # layers: plain background → transparent terminal → figure pinned bottom-right (in front)
+        # layers: plain background → translucent figure pinned bottom-right → transparent terminal (in front)
         self.backdrop = Gtk.Box()
         self.backdrop.get_style_context().add_class("magica-bg")
         self.backdrop_css = Gtk.CssProvider()
@@ -2273,8 +2272,7 @@ class Pane(Gtk.Overlay):
         css = Gtk.CssProvider()
         css.load_from_data(f"vte-terminal {{ padding: {PADDING}px; }}".encode())
         self.term.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        self.add_overlay(self.term)
-        # figure on top of the text; clicks and scrolling pass through to the terminal
+        # figure behind the text (the terminal draws no background); clicks and scrolling go to the terminal
         self.img = Gtk.Image(halign=Gtk.Align.END, valign=Gtk.Align.END)
         self.add_overlay(self.img)
         self.set_overlay_pass_through(self.img, True)
@@ -2287,6 +2285,7 @@ class Pane(Gtk.Overlay):
         self._base_text = None
         self.add_overlay(self.base)
         self.set_overlay_pass_through(self.base, True)
+        self.add_overlay(self.term)
         # border in her colour around the focused pane
         self.frame = Gtk.Box()
         self.frame.get_style_context().add_class("magica-frame")
@@ -2379,7 +2378,7 @@ class Pane(Gtk.Overlay):
             return
         self.game = Crush(self)
         self.add_overlay(self.game)
-        self.reorder_overlay(self.game, 1)   # just above the terminal, under the frame and search bar
+        self.above_term(self.game)   # just above the terminal, under the frame and search bar
         self.game.connect("focus-in-event", lambda *_: self.set_focused(True))
         self.game.connect("focus-out-event", lambda *_: self.set_focused(False))
         self.game.show_all()
@@ -2387,15 +2386,14 @@ class Pane(Gtk.Overlay):
         self.update_figure()
 
     def open_browser(self, text):
-        """`browser`: a web page covers the terminal (the shell waits underneath) until ✕ / Ctrl+Shift+W.
-        She stays in front, translucent."""
+        """`browser`: a web page covers the terminal (the shell waits underneath) until ✕ / Ctrl+Shift+W."""
         if WebKit2 is None:
             self.term.feed(b"\r\n\x1b[31mbrowser needs WebKitGTK: sudo apt install gir1.2-webkit2-4.1\x1b[0m\r\n")
             return
         if not self.browser:
             self.browser = Browser(self)
             self.add_overlay(self.browser)
-            self.reorder_overlay(self.browser, 1)   # just above the terminal, under her figure
+            self.above_term(self.browser)   # just above the terminal, under the frame and search bar
             for w in (self.browser.view, self.browser.entry):
                 w.connect("focus-in-event", lambda *_: self.set_focused(True))
                 w.connect("focus-out-event", lambda *_: self.set_focused(False))
@@ -2419,14 +2417,14 @@ class Pane(Gtk.Overlay):
         self.term.grab_focus()
 
     def open_space(self, path):
-        """`space`: what takes up the disk in a folder covers the terminal until Esc / q. She stays in front, translucent."""
+        """`space`: what takes up the disk in a folder covers the terminal until Esc / q."""
         if self.space:
             self.close_space()
         if not os.path.isdir(path):
             return
         self.space = SpaceView(self, path)
         self.add_overlay(self.space)
-        self.reorder_overlay(self.space, 1)   # just above the terminal, under her figure
+        self.above_term(self.space)   # just above the terminal, under the frame and search bar
         self.space.list.connect("focus-in-event", lambda *_: self.set_focused(True))
         self.space.list.connect("focus-out-event", lambda *_: self.set_focused(False))
         self.space.list.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
@@ -2450,7 +2448,7 @@ class Pane(Gtk.Overlay):
         if not self.notes:
             self.notes = Notes(self)
             self.add_overlay(self.notes)
-            self.reorder_overlay(self.notes, 1)   # just above the terminal, under the frame and search bar
+            self.above_term(self.notes)   # just above the terminal, under the frame and search bar
             self.notes.view.connect("focus-in-event", lambda *_: self.set_focused(True))
             self.notes.view.connect("focus-out-event", lambda *_: self.set_focused(False))
             self.notes.show_all()
@@ -2484,7 +2482,7 @@ class Pane(Gtk.Overlay):
                                                        Gio.DBusSignalFlags.NONE, on_helper_signal)
         self.attached = AttachView(self, frozen)
         self.add_overlay(self.attached)
-        self.reorder_overlay(self.attached, 1)   # just above the terminal, under the frame and search bar
+        self.above_term(self.attached)   # just above the terminal, under the frame and search bar
         self.attached.connect("focus-in-event", lambda *_: self.set_focused(True))
         self.attached.connect("focus-out-event", lambda *_: self.set_focused(False))
         self.attached.show_all()
@@ -2668,8 +2666,11 @@ class Pane(Gtk.Overlay):
         self.hovering = over
         self.update_opacity()
 
+    def above_term(self, w):
+        self.reorder_overlay(w, self.child_get_property(self.term, "index") + 1)
+
     def update_opacity(self):
-        op = HOVER_OPACITY if self.hovering else 1 - (1 - TEXT_OPACITY) * min(1.0, self.cover / max(TEXT_FULL, 0.01))
+        op = FIGURE_OPACITY * (HOVER_OPACITY if self.hovering else 1 - (1 - TEXT_OPACITY) * min(1.0, self.cover / max(TEXT_FULL, 0.01)))
         self.img.set_opacity(op)
         self.base.set_opacity(op)
 
