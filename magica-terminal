@@ -71,6 +71,8 @@ except (ValueError, ImportError):   # `browser` needs gir1.2-webkit2-4.1
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)   # VTE 0.78+ deprecates get_window_title
 
+SHELL_BIN = os.path.join(os.path.dirname(os.path.realpath(__file__)), "shell", "bin")   # wl-copy for the panes
+COPY_DIR = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "magica-terminal-copy")   # its files (shell/bin/wl-copy)
 FIGURES = os.path.join(os.path.dirname(os.path.realpath(__file__)), "figures")   # next to the script (project checkout)
 THEME_FILE = os.path.expanduser("~/.config/magica-terminal/theme")   # "light", "dark" or "system"
 COLORS_FILE = os.path.expanduser("~/.config/magica-terminal/colors.sh")   # prompt colours for ~/.bashrc
@@ -2344,7 +2346,8 @@ class Pane(Gtk.Overlay):
         shell = os.environ.get("SHELL", "/bin/bash")
         self.pid = None
         argv = command or [shell]
-        env = [f"MAGICA_CHAR={self.name}"]   # ~/.bashrc turns this into the character@place prompt
+        env = [f"MAGICA_CHAR={self.name}",   # ~/.bashrc turns this into the character@place prompt
+               f"PATH={SHELL_BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"]   # our wl-copy (see copy_from_pane)
         self.term.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.getcwd() or os.environ.get("HOME"), argv, env,
                               GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self.on_spawned, None)
 
@@ -2564,6 +2567,9 @@ class Pane(Gtk.Overlay):
     def on_title(self, *_):
         # typing a character's name in the shell sends the title "magica:set:<name>" (see ~/.bashrc)
         title = self.term.get_window_title() or ""
+        if title.startswith("magica:copy:"):   # wl-copy in this pane (shell/bin/wl-copy)
+            copy_from_pane(title[len("magica:copy:"):])
+            return
         if title == "magica:crush":   # `crush` (see ~/.bashrc): the game, in this pane
             GLib.idle_add(lambda: self.open_game() and False)
             return
@@ -3363,6 +3369,36 @@ class Window(Gtk.ApplicationWindow):
                 panes[0].term.grab_focus()
             return True
         return False
+
+
+def copy_from_pane(spec):
+    """Put what wl-copy in a pane wrote ("clipboard:<file>" / "primary:<file>", or "clear:<which>") on the clipboard,
+    from the terminal itself. GNOME gives wl-copy no clipboard protocol, so the real one flashes a window for the focus
+    and GNOME pops up a "… is ready" notification on every copy. Only our own files in COPY_DIR are read (then deleted):
+    anything in the pane can set the title."""
+    which, _, rest = spec.partition(":")
+    if which == "clear":
+        which, rest = rest, None
+    if which not in ("clipboard", "primary"):
+        return
+    clip = Gtk.Clipboard.get(Gdk.SELECTION_PRIMARY if which == "primary" else Gdk.SELECTION_CLIPBOARD)
+    if rest is None:
+        clip.set_text("", -1)
+        return
+    path = os.path.realpath(rest)
+    if os.path.dirname(path) != os.path.realpath(COPY_DIR):
+        return
+    try:
+        info = os.lstat(path)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        os.unlink(path)
+    except OSError:
+        return
+    text = data.decode("utf-8", "replace")
+    clip.set_text(text, -1)
 
 
 class App(Gtk.Application):

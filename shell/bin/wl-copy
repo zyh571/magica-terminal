@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# wl-copy inside a Magica Terminal pane (the panes put shell/bin first on PATH). GNOME has no clipboard protocol for
+# wl-copy, so the real one flashes a window to take the focus and GNOME pops up a "… is ready" notification on every
+# copy (Claude Code, editors, scripts). Instead the text goes in a private file and the terminal, which has the focus,
+# puts it on the clipboard: the title "magica:copy:<clipboard|primary>:<file>" (or "magica:copy:clear:<which>").
+# Anything it doesn't handle (other MIME types, tmux, no terminal) goes to the real wl-copy.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+real() {
+  local p= e
+  local IFS=:
+  for e in $PATH; do [ "$e" -ef "$here" ] || p="${p:+$p:}$e"; done   # (-ef: however this folder is spelt)
+  PATH="$p" exec wl-copy "$@"
+}
+[ -n "$MAGICA_CHAR" ] && [ -z "$TMUX" ] && [ -z "$STY" ] || real "$@"
+
+which=clipboard clear= trim= words=()
+args=("$@")
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--primary) which=primary ;;
+    -c|--clear) clear=1 ;;
+    -n|--trim-newline) trim=1 ;;
+    -o|--paste-once|-f|--foreground|-r|--regular) ;;
+    -t|--type|--type=*)
+      if [ "${1#--type=}" != "$1" ]; then t="${1#--type=}"; else t="$2"; shift; fi
+      case "$t" in text/*|TEXT|STRING|UTF8_STRING) ;; *) real "${args[@]}" ;; esac ;;
+    --) shift; words+=("$@"); break ;;
+    -*) real "${args[@]}" ;;
+    *) words+=("$1") ;;
+  esac
+  shift
+done
+
+{ : > /dev/tty; } 2>/dev/null || real "${args[@]}"
+if [ -n "$clear" ]; then
+  printf '\033]0;magica:copy:clear:%s\007' "$which" > /dev/tty
+  exit 0
+fi
+dir="${XDG_RUNTIME_DIR:-/tmp}/magica-terminal-copy"
+mkdir -p -m 700 "$dir" 2>/dev/null
+file="$(mktemp "$dir/XXXXXXXX")" || real "${args[@]}"
+if [ ${#words[@]} -gt 0 ]; then printf '%s' "${words[*]}" > "$file"; else cat > "$file"; fi
+if [ -n "$trim" ]; then
+  # like wl-copy -n: drop one trailing newline
+  [ "$(tail -c1 "$file" | od -An -c | tr -d ' ')" = '\n' ] && truncate -s -1 "$file"
+fi
+printf '\033]0;magica:copy:%s:%s\007' "$which" "$file" > /dev/tty

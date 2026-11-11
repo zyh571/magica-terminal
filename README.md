@@ -55,6 +55,9 @@ In the shell:
   focus go back to the terminal. ✕ or Ctrl+Shift+W puts it back where it was; closing it closes the bar. Placing another
   app's window needs the GNOME Shell extension (`install.sh` adds it; after updating, log out and back in once). If QEMU
   has grabbed the mouse, Ctrl+Alt+G lets go of it; `-display gtk,zoom-to-fit=on` scales the guest to the pane.
+- `wl-copy` in a pane (how Claude Code, editors and scripts copy on Wayland) is the terminal's own (`shell/bin/wl-copy`):
+  the terminal puts the text on the clipboard itself, so GNOME doesn't pop up a "… is ready" notification on every copy.
+  Images and other non-text types, and copies from inside tmux / screen, still go to the real `wl-copy`.
 - In a folder with a `.env`, its `KEY=value` lines are set in the shell (the first time, she asks; `y` / `n` is
   remembered per folder in `~/.config/magica-terminal/env-trust`, delete its line to be asked again). Leaving the
   folder, into a subfolder too, puts every key back as it was. The file is only read, never run; editing it while
