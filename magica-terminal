@@ -33,7 +33,8 @@ GNOME only: the Shell extension in gnome-extension/ places it. The title bar sho
 In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it has played doesn't set a best score.
 Closing the window saves its tabs, splits, characters, folders and each pane's text (the last 2000 lines, without
 colours; ~/.config/magica-terminal/session.json, readable only by you); the next launch restores them, the text above a
-faint "restored" line, unless another Magica Terminal is open. Exiting the last shell clears it.
+faint "restored" line, unless another Magica Terminal is open. A pane running Claude Code resumes that conversation
+(claude --resume, from ~/.claude/sessions/) instead of showing its text. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
 A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
@@ -79,6 +80,8 @@ THEME_FILE = os.path.expanduser("~/.config/magica-terminal/theme")   # "light", 
 COLORS_FILE = os.path.expanduser("~/.config/magica-terminal/colors.sh")   # prompt colours for ~/.bashrc
 SESSION_FILE = os.path.expanduser("~/.config/magica-terminal/session.json")   # tabs / splits saved on close
 HISTORY_LINES = 2000      # how much of each pane's text the session keeps (the last lines)
+CLAUDE_SESSIONS = os.path.expanduser("~/.claude/sessions")   # Claude Code's <pid>.json for each one running
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 FONT = "Maple Mono, Ubuntu Sans Mono 11"   # Maple Mono (soft, rounded; ./install.sh fetches it), else Ubuntu's
 PADDING = 10              # px around the text
 
@@ -318,6 +321,43 @@ def restored_text(history):
     if not lines or lines == [""]:
         return b""
     return ("\r\n".join(lines) + "\r\n\033[2m── restored ──\033[0m\r\n").encode()
+
+
+def descendants(pid):
+    """Every process under pid (children, theirs, …), from /proc."""
+    children = {}
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                with open(f"/proc/{d}/stat") as f:
+                    ppid = int(f.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, ValueError, IndexError):
+                continue
+            children.setdefault(ppid, []).append(int(d))
+    found, todo = [], [pid]
+    while todo:
+        kids = children.get(todo.pop(), [])
+        found += kids
+        todo += kids
+    return found
+
+
+def claude_session(pid):
+    """(session id, folder) of a Claude Code running under pid (a pane's shell), from its ~/.claude/sessions/<pid>.json;
+    None if there isn't one."""
+    if not pid:
+        return None
+    for p in descendants(pid):
+        try:
+            with open(os.path.join(CLAUDE_SESSIONS, f"{p}.json")) as f:
+                info = json.load(f)
+        except (OSError, ValueError):
+            continue
+        sid = info.get("sessionId") if isinstance(info, dict) else None
+        if info.get("pid") == p and isinstance(sid, str) and UUID.fullmatch(sid):
+            cwd = info.get("cwd")
+            return sid, cwd if isinstance(cwd, str) else None
+    return None
 
 
 def other_instance_running():
@@ -2257,7 +2297,7 @@ class Notes(Gtk.Overlay):
 class Pane(Gtk.Overlay):
     """One terminal over a backdrop with its character's figure."""
 
-    def __init__(self, app_window, cwd=None, command=None, character=None, history=None):
+    def __init__(self, app_window, cwd=None, command=None, character=None, history=None, resume=None):
         super().__init__()
         self.win = app_window
         self.game = None          # the `crush` game while it's open over this pane
@@ -2367,6 +2407,8 @@ class Pane(Gtk.Overlay):
         argv = command or [shell]
         env = [f"MAGICA_CHAR={self.name}",   # ~/.bashrc turns this into the character@place prompt
                f"PATH={SHELL_BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"]   # our wl-copy (see copy_from_pane)
+        if not command and isinstance(resume, str) and UUID.fullmatch(resume):
+            env.append(f"MAGICA_RESUME={resume}")   # the Claude Code session it had: ~/.bashrc resumes it
         self.term.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.getcwd() or os.environ.get("HOME"), argv, env,
                               GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self.on_spawned, None)
 
@@ -3117,6 +3159,9 @@ class Window(Gtk.ApplicationWindow):
     # ── session ──
     def serialize(self, widget):
         if isinstance(widget, Pane):
+            claude = claude_session(widget.pid)
+            if claude:   # Claude Code reprints its conversation when it's resumed, so not her text too
+                return {"char": widget.name, "cwd": claude[1] or widget.cwd(), "claude": claude[0]}
             return {"char": widget.name, "cwd": widget.cwd(), "text": widget.history_text()}
         if isinstance(widget, Gtk.Paned):
             a = widget.get_allocation()
@@ -3131,7 +3176,8 @@ class Window(Gtk.ApplicationWindow):
         if "char" in node:
             cwd = node.get("cwd")
             char = character_named(node["char"]) if node["char"] != "kyubey" else None   # root shells aren't restored
-            return Pane(self, cwd if cwd and os.path.isdir(cwd) else None, character=char, history=node.get("text"))
+            return Pane(self, cwd if cwd and os.path.isdir(cwd) else None, character=char, history=node.get("text"),
+                        resume=node.get("claude"))
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL if node["orient"] == "h" else Gtk.Orientation.VERTICAL)
         paned.pack1(self.deserialize(node["a"]), True, True)
         paned.pack2(self.deserialize(node["b"]), True, True)

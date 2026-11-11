@@ -101,7 +101,9 @@ old one, so a crash mid-save never leaves a half-written file.
 Closing the window saves tabs, splits, characters, folders and what's in each pane (its last 2000 lines, as plain
 text, no colours) to `~/.config/magica-terminal/session.json` (readable only by you, since that text can hold
 secrets); the next launch restores them, each pane's old text above a faint "restored" line and a fresh prompt.
-A full-screen app open at the time (vim, Claude Code) comes back as a copy of its last screen.
+A pane that had Claude Code running gets that conversation back instead (`claude --resume <id>` at its first
+prompt, found through `~/.claude/sessions/`; quitting it leaves you in the shell). Any other full-screen app open at
+the time (vim, say) comes back as a copy of its last screen.
 
 ## Windows
 

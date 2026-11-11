@@ -120,7 +120,17 @@ if [ -n "$MAGICA_CHAR" ]; then
     _magica_env_load "$d" "$sig" loaded
     return $status
   }
-  PROMPT_COMMAND="_magica_done; _magica_env; _magica_prompt${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+  # a pane restored from the session that had Claude Code running gets it back (its session id in MAGICA_RESUME), at the
+  # first prompt: after ~/.bashrc and the .env question, and quitting it leaves you in this shell
+  _magica_resume() {
+    local status=$? id="$MAGICA_RESUME"
+    unset MAGICA_RESUME
+    [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && command -v claude >/dev/null || return $status
+    history -s claude --resume "$id"   # (Up brings it back)
+    claude --resume "$id"
+    return $status
+  }
+  PROMPT_COMMAND="_magica_done; _magica_env; _magica_prompt; _magica_resume${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
   PS0=$'\e[0m\e]666;vte.shell.preexec!\e\\\\'   # (VTE needs ESC \ after OSC 666, not BEL) typed command is in her text colour; output goes back to the normal colour
   _magica_prompt
   for _magica_c in madoka homura sayaka mami kyoko; do

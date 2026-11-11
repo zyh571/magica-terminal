@@ -1,6 +1,9 @@
 import importlib.machinery
 import importlib.util
+import json
 import os
+import subprocess
+import tempfile
 import time
 import unittest
 
@@ -65,6 +68,74 @@ class HistoryRoundTripTest(unittest.TestCase):
         again.term.feed(mt.restored_text(text))
         self.settle()
         self.assertEqual(mt.Pane.history_text(again), text + "\n── restored ──")
+
+
+SID = "0123abcd-4567-89ab-cdef-0123456789ab"
+
+
+class ClaudeSessionTest(unittest.TestCase):
+    """A pane with Claude Code running under its shell is saved as that session (~/.claude/sessions/<pid>.json)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old, mt.CLAUDE_SESSIONS = mt.CLAUDE_SESSIONS, self.tmp.name
+        # a "shell" with a "claude" under it
+        self.shell = subprocess.Popen(["bash", "-c", "bash -c 'sleep 30' & wait"])
+        end = time.monotonic() + 5
+        while not (kids := mt.descendants(self.shell.pid)) and time.monotonic() < end:
+            time.sleep(0.05)
+        self.claude = kids[-1]
+
+    def tearDown(self):
+        mt.CLAUDE_SESSIONS = self.old
+        for p in mt.descendants(self.shell.pid):
+            try:
+                os.kill(p, 9)
+            except OSError:
+                pass
+        self.shell.kill()
+        self.shell.wait()
+        self.tmp.cleanup()
+
+    def record(self, pid, **info):
+        with open(os.path.join(self.tmp.name, f"{pid}.json"), "w") as f:
+            json.dump({"pid": pid, "sessionId": SID, "cwd": "/somewhere", **info}, f)
+
+    def test_found(self):
+        self.record(self.claude)
+        self.assertEqual(mt.claude_session(self.shell.pid), (SID, "/somewhere"))
+
+    def test_none(self):
+        self.assertIsNone(mt.claude_session(self.shell.pid))
+        self.record(os.getpid())   # (not under this shell)
+        self.assertIsNone(mt.claude_session(self.shell.pid))
+
+    def test_bad_id(self):
+        self.record(self.claude, sessionId="x; rm -rf ~")
+        self.assertIsNone(mt.claude_session(self.shell.pid))
+
+
+class ResumeInShellTest(unittest.TestCase):
+    """~/.bashrc's _magica_resume: runs `claude --resume <id>` once, only for a real session id."""
+
+    def run_bash(self, resume):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "claude"), "w") as f:
+                f.write('#!/bin/sh\necho "claude $*"\n')
+            os.chmod(os.path.join(tmp, "claude"), 0o755)
+            bash = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shell", "magica.bash")
+            r = subprocess.run(["bash", "--norc", "--noprofile", "-c", f'. "{bash}"\n(exit 3); _magica_resume; '
+                                'echo "status $? [$MAGICA_RESUME]"; _magica_resume'],
+                               capture_output=True, text=True, timeout=10,
+                               env={"HOME": tmp, "PATH": f"{tmp}:/usr/bin:/bin", "MAGICA_CHAR": "madoka",
+                                    "MAGICA_RESUME": resume})
+            return r.stdout
+
+    def test_resumes_once(self):
+        self.assertEqual(self.run_bash(SID), f"claude --resume {SID}\nstatus 3 []\n")
+
+    def test_ignores_anything_else(self):
+        self.assertEqual(self.run_bash("$(touch x)"), "status 3 []\n")
 
 
 if __name__ == "__main__":
