@@ -34,7 +34,8 @@ In the game, A turns autoplay on or off (CRUSH_AUTOPLAY starts it on); a game it
 Closing the window saves its tabs, splits, characters, folders and each pane's text (the last 2000 lines, without
 colours; ~/.config/magica-terminal/session.json, readable only by you); the next launch restores them, the text above a
 faint "restored" line, unless another Magica Terminal is open. A pane running Claude Code resumes that conversation
-(claude --resume, from ~/.claude/sessions/) instead of showing its text. Exiting the last shell clears it.
+(claude --resume, from ~/.claude/sessions/), and one running Codex or opencode that folder's latest session (codex resume
+--last, opencode --continue), instead of showing its text. Exiting the last shell clears it.
 After a while with no output or typing, she does a little idle bob or breath now and then.
 A command that fails squashes her and tints her figure and the bar under it red for a moment; one that ran a long time in a pane
 you're not looking at makes her hop three times (plus a desktop notification if the window isn't active); any other successful command, one small jump. ~/.bashrc
@@ -82,6 +83,16 @@ SESSION_FILE = os.path.expanduser("~/.config/magica-terminal/session.json")   # 
 HISTORY_LINES = 2000      # how much of each pane's text the session keeps (the last lines)
 CLAUDE_SESSIONS = os.path.expanduser("~/.claude/sessions")   # Claude Code's <pid>.json for each one running
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# coding agents a restored pane starts again (MAGICA_RESUME, see ~/.bashrc's _magica_resume): "claude:<session id>"
+# (exact, from ~/.claude/sessions), or the tool's name for "its latest session in this folder" (codex resume --last,
+# opencode --continue). Their subcommands that aren't the interactive app are left alone.
+RESUME = re.compile(r"claude:" + UUID.pattern + r"|codex|opencode")
+AGENT_NOT_INTERACTIVE = {
+    "codex": {"exec", "e", "review", "login", "logout", "mcp", "mcp-server", "app-server", "app", "completion", "sandbox",
+              "debug", "apply", "a", "cloud", "features", "help"},
+    "opencode": {"run", "serve", "web", "session", "export", "import", "auth", "models", "mcp", "stats", "upgrade",
+                 "uninstall", "github", "acp", "agent", "debug", "pr", "help"},
+}
 FONT = "Maple Mono, Ubuntu Sans Mono 11"   # Maple Mono (soft, rounded; ./install.sh fetches it), else Ubuntu's
 PADDING = 10              # px around the text
 
@@ -358,6 +369,36 @@ def claude_session(pid):
             cwd = info.get("cwd")
             return sid, cwd if isinstance(cwd, str) else None
     return None
+
+
+def foreground_agent(shell_pid):
+    """The coding agent (codex / opencode) running in the foreground of a pane's terminal (the terminal's foreground
+    process group, from its shell's /proc stat), if that's what is there."""
+    if not shell_pid:
+        return None
+    try:
+        with open(f"/proc/{shell_pid}/stat") as f:
+            pgid = int(f.read().rsplit(")", 1)[1].split()[5])   # tpgid
+        if pgid <= 0 or pgid == shell_pid:
+            return None
+        with open(f"/proc/{pgid}/cmdline", "rb") as f:
+            argv = [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+    except (OSError, ValueError, IndexError):
+        return None
+    return agent_in(argv)
+
+
+def agent_in(argv):
+    """"codex" / "opencode" if argv is that agent's interactive app (not one of its other subcommands), else None."""
+    if argv and os.path.basename(argv[0]) in ("node", "bun", "deno"):   # an npm install: node …/bin/codex.js
+        argv = argv[1:]
+    if not argv:
+        return None
+    name = re.sub(r"\.(c|m)?js$", "", os.path.basename(argv[0]))
+    if name not in AGENT_NOT_INTERACTIVE:
+        return None
+    words = [a for a in argv[1:] if not a.startswith("-")]
+    return None if words and words[0] in AGENT_NOT_INTERACTIVE[name] else name
 
 
 def other_instance_running():
@@ -2407,8 +2448,8 @@ class Pane(Gtk.Overlay):
         argv = command or [shell]
         env = [f"MAGICA_CHAR={self.name}",   # ~/.bashrc turns this into the character@place prompt
                f"PATH={SHELL_BIN}:{os.environ.get('PATH', '/usr/bin:/bin')}"]   # our wl-copy (see copy_from_pane)
-        if not command and isinstance(resume, str) and UUID.fullmatch(resume):
-            env.append(f"MAGICA_RESUME={resume}")   # the Claude Code session it had: ~/.bashrc resumes it
+        if not command and isinstance(resume, str) and RESUME.fullmatch(resume):
+            env.append(f"MAGICA_RESUME={resume}")   # the coding agent it had (RESUME): ~/.bashrc starts it again
         self.term.spawn_async(Vte.PtyFlags.DEFAULT, cwd or os.getcwd() or os.environ.get("HOME"), argv, env,
                               GLib.SpawnFlags.SEARCH_PATH, None, None, -1, None, self.on_spawned, None)
 
@@ -3160,8 +3201,11 @@ class Window(Gtk.ApplicationWindow):
     def serialize(self, widget):
         if isinstance(widget, Pane):
             claude = claude_session(widget.pid)
-            if claude:   # Claude Code reprints its conversation when it's resumed, so not her text too
-                return {"char": widget.name, "cwd": claude[1] or widget.cwd(), "claude": claude[0]}
+            if claude:   # a resumed agent shows its conversation again itself, so not her text too
+                return {"char": widget.name, "cwd": claude[1] or widget.cwd(), "resume": f"claude:{claude[0]}"}
+            agent = foreground_agent(widget.pid)
+            if agent:
+                return {"char": widget.name, "cwd": widget.cwd(), "resume": agent}
             return {"char": widget.name, "cwd": widget.cwd(), "text": widget.history_text()}
         if isinstance(widget, Gtk.Paned):
             a = widget.get_allocation()
@@ -3177,7 +3221,7 @@ class Window(Gtk.ApplicationWindow):
             cwd = node.get("cwd")
             char = character_named(node["char"]) if node["char"] != "kyubey" else None   # root shells aren't restored
             return Pane(self, cwd if cwd and os.path.isdir(cwd) else None, character=char, history=node.get("text"),
-                        resume=node.get("claude"))
+                        resume=node.get("resume") or (node.get("claude") and f"claude:{node['claude']}"))
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL if node["orient"] == "h" else Gtk.Orientation.VERTICAL)
         paned.pack1(self.deserialize(node["a"]), True, True)
         paned.pack2(self.deserialize(node["b"]), True, True)

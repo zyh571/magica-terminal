@@ -120,14 +120,21 @@ if [ -n "$MAGICA_CHAR" ]; then
     _magica_env_load "$d" "$sig" loaded
     return $status
   }
-  # a pane restored from the session that had Claude Code running gets it back (its session id in MAGICA_RESUME), at the
-  # first prompt: after ~/.bashrc and the .env question, and quitting it leaves you in this shell
+  # a pane restored from the session that had a coding agent running gets it back (MAGICA_RESUME: "claude:<session id>",
+  # "codex" or "opencode", for that folder's latest one) at the first prompt: after ~/.bashrc and the .env question, and
+  # quitting it leaves you in this shell
   _magica_resume() {
-    local status=$? id="$MAGICA_RESUME"
+    local status=$? r="$MAGICA_RESUME" cmd
     unset MAGICA_RESUME
-    [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && command -v claude >/dev/null || return $status
-    history -s claude --resume "$id"   # (Up brings it back)
-    claude --resume "$id"
+    case "$r" in
+      claude:*) [[ ${r#claude:} =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] &&
+                  cmd=(claude --resume "${r#claude:}") ;;
+      codex) cmd=(codex resume --last) ;;
+      opencode) cmd=(opencode --continue) ;;
+    esac
+    [ -n "${cmd[*]}" ] && command -v "${cmd[0]}" >/dev/null || return $status
+    history -s "${cmd[*]}"   # (Up brings it back)
+    "${cmd[@]}"
     return $status
   }
   PROMPT_COMMAND="_magica_done; _magica_env; _magica_prompt; _magica_resume${PROMPT_COMMAND:+; $PROMPT_COMMAND}"

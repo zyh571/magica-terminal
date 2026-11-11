@@ -1,9 +1,11 @@
 import importlib.machinery
 import importlib.util
+import fcntl
 import json
 import os
 import subprocess
 import tempfile
+import termios
 import time
 import unittest
 
@@ -120,9 +122,10 @@ class ResumeInShellTest(unittest.TestCase):
 
     def run_bash(self, resume):
         with tempfile.TemporaryDirectory() as tmp:
-            with open(os.path.join(tmp, "claude"), "w") as f:
-                f.write('#!/bin/sh\necho "claude $*"\n')
-            os.chmod(os.path.join(tmp, "claude"), 0o755)
+            for tool in ("claude", "codex", "opencode"):
+                with open(os.path.join(tmp, tool), "w") as f:
+                    f.write(f'#!/bin/sh\necho "{tool} $*"\n')
+                os.chmod(os.path.join(tmp, tool), 0o755)
             bash = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shell", "magica.bash")
             r = subprocess.run(["bash", "--norc", "--noprofile", "-c", f'. "{bash}"\n(exit 3); _magica_resume; '
                                 'echo "status $? [$MAGICA_RESUME]"; _magica_resume'],
@@ -132,10 +135,58 @@ class ResumeInShellTest(unittest.TestCase):
             return r.stdout
 
     def test_resumes_once(self):
-        self.assertEqual(self.run_bash(SID), f"claude --resume {SID}\nstatus 3 []\n")
+        self.assertEqual(self.run_bash(f"claude:{SID}"), f"claude --resume {SID}\nstatus 3 []\n")
+
+    def test_others_take_their_latest(self):
+        self.assertEqual(self.run_bash("codex"), "codex resume --last\nstatus 3 []\n")
+        self.assertEqual(self.run_bash("opencode"), "opencode --continue\nstatus 3 []\n")
 
     def test_ignores_anything_else(self):
-        self.assertEqual(self.run_bash("$(touch x)"), "status 3 []\n")
+        for r in ("$(touch x)", "claude:nope", "bash", "codex; id"):
+            self.assertEqual(self.run_bash(r), "status 3 []\n", r)
+
+
+class ForegroundAgentTest(unittest.TestCase):
+    """Which coding agent is in the foreground of a terminal: a shell in a pty running something named "codex"."""
+
+    def foreground(self, name):
+        master, slave = os.openpty()
+        self.addCleanup(os.close, master)
+
+        def own_tty():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+        # (exec -a: a bash named codex, waiting at its prompt; Ubuntu's coreutils won't run under another name)
+        shell = subprocess.Popen(["bash", "--norc", "-ic", f"(exec -a {name} bash --norc -i); :"], stdin=slave,
+                                 stdout=slave, stderr=slave, preexec_fn=own_tty)
+        os.close(slave)
+        self.addCleanup(lambda: (os.killpg(shell.pid, 9), shell.wait()))
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            kids = mt.descendants(shell.pid)
+            if kids:
+                with open(f"/proc/{shell.pid}/stat") as f:
+                    if int(f.read().rsplit(")", 1)[1].split()[5]) == kids[0]:
+                        return mt.foreground_agent(shell.pid)
+            time.sleep(0.05)
+        self.fail("no foreground job")
+
+    def test_foreground(self):
+        self.assertEqual(self.foreground("codex"), "codex")
+        self.assertIsNone(self.foreground("vim"))
+        self.assertIsNone(mt.foreground_agent(os.getpid()))
+
+    def test_argv(self):
+        self.assertEqual(mt.agent_in(["codex"]), "codex")
+        self.assertEqual(mt.agent_in(["/home/u/.local/bin/codex", "--model", "x", "fix it"]), "codex")
+        self.assertEqual(mt.agent_in(["codex", "resume", "--last"]), "codex")
+        self.assertEqual(mt.agent_in(["node", "/usr/lib/node_modules/@openai/codex/bin/codex.js"]), "codex")
+        self.assertEqual(mt.agent_in(["opencode", "-c"]), "opencode")
+        self.assertIsNone(mt.agent_in(["codex", "exec", "do it"]))
+        self.assertIsNone(mt.agent_in(["opencode", "serve"]))
+        self.assertIsNone(mt.agent_in(["node", "server.js"]))
+        self.assertIsNone(mt.agent_in([]))
 
 
 if __name__ == "__main__":

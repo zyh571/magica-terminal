@@ -101,8 +101,10 @@ old one, so a crash mid-save never leaves a half-written file.
 Closing the window saves tabs, splits, characters, folders and what's in each pane (its last 2000 lines, as plain
 text, no colours) to `~/.config/magica-terminal/session.json` (readable only by you, since that text can hold
 secrets); the next launch restores them, each pane's old text above a faint "restored" line and a fresh prompt.
-A pane that had Claude Code running gets that conversation back instead (`claude --resume <id>` at its first
-prompt, found through `~/.claude/sessions/`; quitting it leaves you in the shell). Any other full-screen app open at
+A pane that had a coding agent running gets it back instead, at its first prompt (quitting it leaves you in the
+shell): Claude Code that exact conversation (`claude --resume <id>`, found through `~/.claude/sessions/`); Codex and
+opencode don't say which process has which session, so that folder's latest one (`codex resume --last`,
+`opencode --continue`). Two of them in one folder both get the latest. Any other full-screen app open at
 the time (vim, say) comes back as a copy of its last screen.
 
 ## Windows
