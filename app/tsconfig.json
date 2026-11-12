@@ -9,5 +9,6 @@
     "skipLibCheck": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "shell/tests"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }

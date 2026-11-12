@@ -1,6 +1,6 @@
 // What every shell script must do, run against bash / zsh / pwsh (each test file calls shellCases for its shell).
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { have, Kind, sandbox, Sandbox } from "./run";
 
@@ -78,7 +78,7 @@ export function shellCases(kind: Kind) {
       const bin = join(sb.root, "bin");
       mkdirSync(bin);
       const fake = join(bin, kind === "pwsh" ? "codex" : "codex");
-      require("node:fs").writeFileSync(fake, '#!/bin/sh\necho "codex $*"\n', { mode: 0o755 });
+      writeFileSync(fake, '#!/bin/sh\necho "codex $*"\n', { mode: 0o755 });
       const out = run(`${prompt(kind)}\n${prompt(kind)}`, { PATH: `${bin}:${process.env.PATH}`, MAGICA_RESUME: "codex" });
       expect(out.split("codex resume --last").length - 1).toBe(1);
     });
