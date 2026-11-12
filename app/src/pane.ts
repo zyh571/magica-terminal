@@ -9,6 +9,7 @@ import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { characterNamed, type CharName } from "./characters";
 import { openCrush } from "./crush/view";
 import { Figure } from "./figure";
+import { cellSpacing, charWidth } from "./font";
 import { killPane, pathExists, resizePane, spawnPane, writePane } from "./ipc";
 import { findLinks, linkUrl, resolvePath } from "./links";
 import { openNotes } from "./notes/view";
@@ -105,6 +106,7 @@ export class Pane implements PaneHost {
     const unicode = new Unicode11Addon();
     this.term.loadAddon(unicode);
     this.term.unicode.activeVersion = "11";
+    this.fitCells();
     this.term.open(host);
     try {
       const gl = new WebglAddon();
@@ -305,8 +307,15 @@ export class Pane implements PaneHost {
   setFont(family: string, size: number) {
     this.term.options.fontFamily = family;
     this.term.options.fontSize = size;
+    this.fitCells();
     this.layout();
     this.overlay?.restyle?.();
+  }
+
+  /** Cells as wide as the glyphs: see cellSpacing. */
+  private fitCells() {
+    const o = this.term.options;
+    o.letterSpacing = cellSpacing(charWidth(o.fontFamily ?? "monospace", o.fontSize ?? 15), devicePixelRatio);
   }
 
   layout() {

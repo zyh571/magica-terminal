@@ -2,6 +2,7 @@
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
+import { loadFonts } from "./font";
 import { getSettings, loadSession, readText, startup } from "./ipc";
 import { DEFAULTS } from "./settings";
 import type { ThemeName } from "./theme";
@@ -20,7 +21,7 @@ async function main() {
     (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) as ThemeName;
   const theme: ThemeName = chosen === "light" || chosen === "dark" ? chosen : system;
   // xterm measures the font once: have it loaded first
-  await Promise.all(["normal", "bold"].map((w) => document.fonts.load(`${w} 14px "Maple Mono"`).catch(() => [])));
+  await loadFonts();
 
   const win = new MagicaWindow(document.getElementById("app")!, {
     settings: { ...DEFAULTS, ...settings },
