@@ -293,6 +293,7 @@ mod tests {
         std::fs::write(p, (0..n).map(|i| (i * 7919 % 251) as u8).collect::<Vec<_>>()).unwrap();
     }
 
+    #[cfg(unix)]
     fn tree() -> (tempfile::TempDir, std::path::PathBuf) {
         let d = tempfile::tempdir().unwrap();
         let top = d.path().join("top");
