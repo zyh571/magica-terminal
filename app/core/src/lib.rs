@@ -3,4 +3,6 @@
 //! Kept free of Tauri so it builds and tests anywhere.
 pub mod fsio;
 pub mod paths;
+pub mod pty;
 pub mod settings;
+pub mod shell;

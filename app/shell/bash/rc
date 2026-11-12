@@ -1,0 +1,5 @@
+# Magica Terminal starts bash with this as its rc file: the user's own startup file first, then Magica's script.
+if [ "$(uname)" = Darwin ] && [ -r ~/.bash_profile ]; then . ~/.bash_profile
+elif [ -r ~/.bashrc ]; then . ~/.bashrc
+fi
+. "$MAGICA_SHELL_DIR/magica.bash"
