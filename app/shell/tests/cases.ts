@@ -13,7 +13,7 @@ function prompt(kind: Kind): string {
   return "Write-Output (prompt)";
 }
 function fail(kind: Kind): string {
-  return kind === "pwsh" ? "$global:LASTEXITCODE = 1; $global:_magica_test_ok = $false" : "false";
+  return kind === "pwsh" ? "& false" : "false";
 }
 
 export function shellCases(kind: Kind) {

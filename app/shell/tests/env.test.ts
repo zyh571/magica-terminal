@@ -27,7 +27,7 @@ function script(kind: Kind, steps: Step[], root: string): string {
         case "env": return `_magica_env`;
         case "show": return `Write-Output ('[' + ((${s.slice(1).map((k) => pq(k)).join(",")}) | ForEach-Object { $v = [Environment]::GetEnvironmentVariable($_); if ($null -eq $v) { 'unset' } else { $v } }) -join '|') + ']')`;
         case "child": return `pwsh -NoProfile -Command ${pq(`$v = $env:${s[1]}; if ($null -eq $v) { $v = 'unset' }; Write-Output "child=$v"`)}`;
-        case "false": return `$global:LASTEXITCODE = 1; $global:_magica_test_ok = $false`;
+        case "false": return `& false`;
         case "status": return `Write-Output "s=$global:LASTEXITCODE"`;
         case "setlocal": return `$env:${s[1]} = ${pq(s[2])}`;
         case "write": return `[IO.File]::WriteAllText((Join-Path (Get-Location) ${pq(s[1])}), ${pq(s[2])})`;

@@ -1,7 +1,5 @@
 // The bash script's side of the protocol (src/protocol.ts).
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 import { sandbox, Sandbox } from "./run";
 import { shellCases } from "./cases";
 
