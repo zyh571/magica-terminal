@@ -1,0 +1,37 @@
+{
+ "size": [
+  1100,
+  700
+ ],
+ "current": 1,
+ "tabs": [
+  {
+   "char": "madoka",
+   "cwd": "/home/u",
+   "text": "madoka@magica:~$ ls\nDocuments  Downloads"
+  },
+  {
+   "orient": "h",
+   "ratio": 0.5,
+   "a": {
+    "char": "homura",
+    "cwd": "/home/u/projects",
+    "resume": "claude:0b5e7f3a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+   },
+   "b": {
+    "orient": "v",
+    "ratio": 0.4,
+    "a": {
+     "char": "sayaka",
+     "cwd": "/tmp",
+     "claude": "0b5e7f3a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"
+    },
+    "b": {
+     "char": "kyubey",
+     "cwd": "/root",
+     "text": ""
+    }
+   }
+  }
+ ]
+}
