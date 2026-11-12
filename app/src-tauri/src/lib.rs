@@ -45,7 +45,7 @@ fn get_settings(app: State<App>) -> Value {
 }
 
 #[tauri::command]
-fn startup(app: State<App>) -> Startup {
+fn get_startup(app: State<App>) -> Startup {
     app.startup.clone()
 }
 
@@ -179,7 +179,7 @@ pub fn run(overlay: Option<Overlay>, command: Option<Vec<String>>) {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_settings, startup, read_text, write_text, pty_spawn, pty_write, pty_resize, pty_kill, pane_resume,
+            get_settings, get_startup, read_text, write_text, pty_spawn, pty_write, pty_resize, pty_kill, pane_resume,
             load_session, save_session, clear_session, path_exists, scan_new, scan_up, scan_view, scan_drop
         ])
         .run(tauri::generate_context!())

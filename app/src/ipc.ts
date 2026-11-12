@@ -31,7 +31,7 @@ export const resizePane = (id: number, cols: number, rows: number) => invoke("pt
 export const killPane = (id: number) => invoke("pty_kill", { id });
 export const paneResume = (id: number) => invoke<{ resume: string; cwd: string | null } | null>("pane_resume", { id });
 export const getSettings = () => invoke<Settings>("get_settings");
-export const startup = () => invoke<Startup>("startup");
+export const startup = () => invoke<Startup>("get_startup");
 export const readText = (name: "note.txt" | "crush.json" | "theme") => invoke<string>("read_text", { name });
 export const writeText = (name: "note.txt" | "crush.json" | "theme", text: string) => invoke<boolean>("write_text", { name, text });
 export const loadSession = () => invoke<unknown>("load_session");
