@@ -1,8 +1,9 @@
 // What every shell script must do, run against bash / zsh / pwsh (each test file calls shellCases for its shell).
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { have, Kind, sandbox, Sandbox } from "./run";
+import { fakeAgent, have, Kind, PWSH_FAIL, sandbox, Sandbox } from "./run";
+import { parseOsc7 } from "../../src/protocol";
 
 const OSC = (s: string) => `\x1b]${s}\x1b\\`;
 
@@ -13,7 +14,7 @@ function prompt(kind: Kind): string {
   return "Write-Output (prompt)";
 }
 function fail(kind: Kind): string {
-  return kind === "pwsh" ? "& false" : "false";
+  return kind === "pwsh" ? PWSH_FAIL : "false";
 }
 
 export function shellCases(kind: Kind) {
@@ -57,7 +58,8 @@ export function shellCases(kind: Kind) {
       const out = run(`${fail(kind)}\n${prompt(kind)}`);
       expect(out).toContain(OSC("133;D;1"));
       expect(out).toContain(`\x1b]7;file://`);
-      expect(out).toMatch(new RegExp(`\\x1b\\]7;file://[^/]*${sb.root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\x1b\\\\`));
+      const url = out.match(/\x1b\]7;(file:\/\/[^\x1b]*)\x1b\\/)?.[1] ?? "";
+      expect(parseOsc7(url)).toBe(sb.root); // the app reads back the folder the shell is in
       expect(out).toContain(OSC("133;A"));
       expect(out).toContain(OSC("133;B"));
       expect(out).toContain("madoka@magica");
@@ -77,9 +79,7 @@ export function shellCases(kind: Kind) {
     test("resume runs the agent once", () => {
       const bin = join(sb.root, "bin");
       mkdirSync(bin);
-      const fake = join(bin, kind === "pwsh" ? "codex" : "codex");
-      writeFileSync(fake, '#!/bin/sh\necho "codex $*"\n', { mode: 0o755 });
-      const out = run(`${prompt(kind)}\n${prompt(kind)}`, { PATH: `${bin}:${process.env.PATH}`, MAGICA_RESUME: "codex" });
+      const out = run(`${prompt(kind)}\n${prompt(kind)}`, { PATH: fakeAgent(bin, "codex"), MAGICA_RESUME: "codex" });
       expect(out.split("codex resume --last").length - 1).toBe(1);
     });
     test("resume ignores a bad claude id", () => {

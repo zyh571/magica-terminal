@@ -139,7 +139,7 @@ mod tests {
     use super::*;
 
     fn opts() -> SpawnOpts {
-        SpawnOpts { character: "homura".into(), cwd: Some("/tmp".into()), ..Default::default() }
+        SpawnOpts { character: "homura".into(), cwd: Some(std::env::temp_dir().to_string_lossy().into_owned()), ..Default::default() }
     }
     fn argv(c: &CommandBuilder) -> Vec<String> {
         c.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect()
@@ -163,7 +163,7 @@ mod tests {
         let c = command_for(&ShellKind::Bash("/bin/bash".into()), &opts(), Path::new(DIR), Path::new("/cfg"));
         let a = argv(&c);
         assert_eq!(a[0], "/bin/bash");
-        assert!(a.windows(2).any(|w| w[0] == "--rcfile" && w[1] == format!("{DIR}/bash/rc")), "{a:?}");
+        assert!(a.windows(2).any(|w| w[0] == "--rcfile" && w[1] == Path::new(DIR).join("bash").join("rc").to_string_lossy()), "{a:?}");
         assert!(a.contains(&"-i".to_string()));
         assert_eq!(env(&c, "MAGICA_APP").as_deref(), Some("tauri"));
         assert_eq!(env(&c, "MAGICA_CHAR").as_deref(), Some("homura"));
@@ -171,13 +171,13 @@ mod tests {
         assert_eq!(env(&c, "MAGICA_CONFIG").as_deref(), Some("/cfg"));
         assert_eq!(env(&c, "TERM").as_deref(), Some("xterm-256color"));
         assert_eq!(env(&c, "MAGICA_RESUME"), None);
-        assert_eq!(c.get_cwd().map(|p| p.to_string_lossy().into_owned()).as_deref(), Some("/tmp"));
+        assert_eq!(c.get_cwd().map(|p| p.to_string_lossy().into_owned()).as_deref(), Some(&*std::env::temp_dir().to_string_lossy()));
     }
 
     #[test]
     fn zsh_env_has_zdotdir() {
         let c = command_for(&ShellKind::Zsh("/bin/zsh".into()), &opts(), Path::new(DIR), Path::new("/cfg"));
-        assert_eq!(env(&c, "ZDOTDIR").as_deref(), Some(&*format!("{DIR}/zsh")));
+        assert_eq!(env(&c, "ZDOTDIR").as_deref(), Some(&*Path::new(DIR).join("zsh").to_string_lossy()));
         assert!(env(&c, "MAGICA_USER_ZDOTDIR").is_some());
         assert!(argv(&c).contains(&"-i".to_string()));
     }

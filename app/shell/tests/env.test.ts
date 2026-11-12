@@ -1,8 +1,8 @@
 // A folder's .env, the same in every shell: one table of steps, translated into bash, zsh and PowerShell.
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { have, Kind, sandbox, Sandbox } from "./run";
+import { isAbsolute, join } from "node:path";
+import { exe, have, Kind, PWSH_FAIL, sandbox, Sandbox } from "./run";
 
 type Step =
   | ["cd", string]          // a folder (relative to the sandbox root, or absolute)
@@ -19,15 +19,15 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 const pq = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 function script(kind: Kind, steps: Step[], root: string): string {
-  const abs = (p: string) => (p.startsWith("/") ? p : join(root, p));
+  const abs = (p: string) => (isAbsolute(p) ? p : join(root, p));
   return steps.map((s) => {
     if (kind === "pwsh") {
       switch (s[0]) {
         case "cd": return `Set-Location -LiteralPath ${pq(abs(s[1]))}`;
         case "env": return `_magica_env`;
         case "show": return `Write-Output ('[' + ((@(${s.slice(1).map((k) => pq(k)).join(",")}) | ForEach-Object { $v = [Environment]::GetEnvironmentVariable($_); if ($null -eq $v) { 'unset' } else { $v } }) -join '|') + ']')`;
-        case "child": return `pwsh -NoProfile -Command ${pq(`$v = $env:${s[1]}; if ($null -eq $v) { $v = 'unset' }; Write-Output "child=$v"`)}`;
-        case "false": return `& false`;
+        case "child": return `${exe("pwsh")} -NoProfile -Command ${pq(`$v = $env:${s[1]}; if ($null -eq $v) { $v = 'unset' }; Write-Output "child=$v"`)}`;
+        case "false": return PWSH_FAIL;
         case "status": return `Write-Output "s=$global:LASTEXITCODE"`;
         case "setlocal": return `$env:${s[1]} = ${pq(s[2])}`;
         case "write": return `[IO.File]::WriteAllText((Join-Path (Get-Location) ${pq(s[1])}), ${pq(s[2])})`;

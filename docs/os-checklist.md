@@ -84,3 +84,22 @@ Keys below are written as macOS / Windows.
 - Windows: the shell is PowerShell (pwsh if installed); cmd.exe and WSL shells start plainly without integration.
 - macOS: bash integration needs bash 4+ (Homebrew's); the stock zsh is fully supported.
 - Compile checks for macOS and Windows were run from Linux where possible; see `docs/superpowers/plans/os-check-notes.md` if present.
+
+## Windows: first run (2026-11-13, Windows 11, no pwsh 7, so Windows PowerShell 5.1)
+
+Done:
+- `cargo test --workspace`: 38 pass (3 tests fixed: they hard-coded `/` separators and a `/tmp` folder).
+- `npm test`: 114 pass. PowerShell's integration tests now run under Windows PowerShell when pwsh 7 is missing (as the
+  app does), with Windows-safe fixtures (`cmd /c exit 1` for a failing command, a `.cmd` fake agent, `;` in PATH,
+  the env vars Windows programs need). Before, they all skipped, so the shell the app really uses was untested.
+- `npx tauri build --no-bundle`: `target\release\magica-dev.exe` (13.8 MB) starts, opens "Magica Terminal" in
+  WebView2 and starts `powershell.exe` under ConPTY, dot-sourcing `shell\magica.ps1` (checked that the `\?\` path loads).
+
+To do / decide:
+- [ ] The checks above, by hand (only start-up was checked: no keys, panes, figures, notepad or session).
+- [ ] Install pwsh 7 and run `npm test` again; only 5.1 was tested.
+- [ ] Installers: `tauri build` with bundling (MSI / NSIS) and `install.ps1` weren't run.
+- [ ] Decide: bash/zsh integration tests are skipped on Windows. Git Bash as a pane shell would send MSYS paths
+      (`/c/Users/...`, `/tmp/...`) in OSC 7 and `space`, which `parseOsc7` doesn't convert. Support it (convert MSYS
+      paths, or `cygpath -m` in `magica.bash`), or keep it out like cmd.exe and WSL.
+- [ ] The frontend bundle is 855 kB (Vite warns above 500 kB); code-split if start-up is slow.
