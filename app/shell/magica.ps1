@@ -68,7 +68,10 @@ if ($env:MAGICA_APP -eq 'tauri' -and $env:MAGICA_CHAR) {
 
   function global:_magica_env_unload([switch]$quiet) {
     foreach ($k in $global:_magica_env_keys) {
-      [Environment]::SetEnvironmentVariable($k, $global:_magica_env_old[$k])   # ($null: unset)
+      $old = $global:_magica_env_old[$k]
+      # (not SetEnvironmentVariable($k, $null): PowerShell passes $null as "", which on Linux / macOS sets it empty)
+      if ($null -eq $old) { Remove-Item -LiteralPath "Env:$k" -ErrorAction SilentlyContinue }
+      else { [Environment]::SetEnvironmentVariable($k, $old) }
     }
     $global:_magica_env_keys = @(); $global:_magica_env_old = @{}
     $global:_magica_env_dir = $null; $global:_magica_env_sig = $null

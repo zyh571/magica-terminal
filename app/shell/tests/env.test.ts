@@ -25,7 +25,7 @@ function script(kind: Kind, steps: Step[], root: string): string {
       switch (s[0]) {
         case "cd": return `Set-Location -LiteralPath ${pq(abs(s[1]))}`;
         case "env": return `_magica_env`;
-        case "show": return `Write-Output ('[' + ((${s.slice(1).map((k) => pq(k)).join(",")}) | ForEach-Object { $v = [Environment]::GetEnvironmentVariable($_); if ($null -eq $v) { 'unset' } else { $v } }) -join '|') + ']')`;
+        case "show": return `Write-Output ('[' + ((@(${s.slice(1).map((k) => pq(k)).join(",")}) | ForEach-Object { $v = [Environment]::GetEnvironmentVariable($_); if ($null -eq $v) { 'unset' } else { $v } }) -join '|') + ']')`;
         case "child": return `pwsh -NoProfile -Command ${pq(`$v = $env:${s[1]}; if ($null -eq $v) { $v = 'unset' }; Write-Output "child=$v"`)}`;
         case "false": return `& false`;
         case "status": return `Write-Output "s=$global:LASTEXITCODE"`;
