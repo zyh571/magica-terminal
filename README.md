@@ -1,122 +1,137 @@
 # Magica Terminal
 
-A small GTK3 + VTE terminal where every pane belongs to a Puella Magi Madoka Magica character.
-Her HELLO! GOOD SMILE figure stands in the bottom-right corner, and the prompt, cursor and selection use her colour.
+A terminal where every pane belongs to a Puella Magi Madoka Magica character. Her HELLO! GOOD SMILE figure stands in
+the bottom-right corner, and the prompt, cursor and selection use her colour. It runs on Linux, macOS and Windows
+(Tauri: Rust for the terminals and files, xterm.js in the system web view for the window).
 
 ## Install
 
+You need Rust and Node.js 20+ to build it. `install.sh` checks for them and says what's missing.
+
+**Linux** (also needs WebKitGTK's development files; on Ubuntu the script offers to `apt install` them):
+
 ```sh
-./install.sh            # links ~/.local/bin/magica-terminal, the launcher and the bash integration
-./install.sh --default  # …and makes it the default terminal
+./install.sh            # builds it, links ~/.local/bin/magica-terminal and adds it to your app launcher
+./install.sh --default  # …and makes it the default terminal (Ubuntu's xdg-terminal-exec)
 ```
 
-Everything is linked back to this folder, so edits here show up in new windows. It needs `python3-gi`,
-`gir1.2-vte-2.91` (VTE 0.78+) and `notify-send`; `browser` also needs `gir1.2-webkit2-4.1`.
+**macOS** (`xcode-select --install` first if you haven't): `./install.sh` puts `Magica Terminal.app` in
+`~/Applications` and links `~/.local/bin/magica-terminal`. It's unsigned, so open it the first time by right-clicking
+it and choosing Open.
 
-## Use
+**Windows 11** (in PowerShell):
 
-| Keys | |
-|---|---|
-| Ctrl+Shift+O / E | split right / down |
-| Ctrl+Shift+W | close pane (or the `browser` page, `space` view or `attach`ed window over it) |
-| Ctrl+Alt+Arrows | move between panes |
-| Ctrl+Shift+T, Ctrl+PageUp/Down | new tab, switch tabs |
-| Ctrl+1…8 / Ctrl+9 | go to tab N / last tab |
-| Ctrl+Shift+C / V | copy / paste |
-| Ctrl+Shift+Plus / Minus / 0 | font size |
-| Ctrl+Shift+L | light / dark |
-| Ctrl+Shift+F | search (Enter older, Shift+Enter newer, Esc) |
-| Ctrl+click | open a link or file path |
+```powershell
+winget install Rustlang.Rustup OpenJS.NodeJS.LTS
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+.\install.ps1   # builds it into %LOCALAPPDATA%\Programs\magica-terminal, adds it to PATH and the Start Menu
+```
 
-In the shell:
+Run the installer again after `git pull` or an edit. It also removes what the old Python version installed (its
+`~/.bashrc` line and GNOME Shell extension); your notes, Crush score, settings and last session carry over.
+
+## Keys
+
+| | Linux, Windows | macOS |
+|---|---|---|
+| split right / down | Ctrl+Shift+O / Ctrl+Shift+E | Cmd+D / Cmd+Shift+D |
+| close pane | Ctrl+Shift+W | Cmd+W |
+| move between panes | Ctrl+Alt+Arrows | Cmd+Option+Arrows |
+| new tab | Ctrl+Shift+T | Cmd+T |
+| previous / next tab | Ctrl+PageUp / PageDown | Cmd+Shift+[ / ] |
+| tab 1…8 / last tab | Ctrl+1…8 / Ctrl+9 | Cmd+1…8 / Cmd+9 |
+| copy / paste | Ctrl+Shift+C / V | Cmd+C / V |
+| font size | Ctrl+Shift+Plus / Minus / 0 | Cmd+Plus / Minus / 0 |
+| light / dark | Ctrl+Shift+L | Cmd+Shift+L |
+| search (Enter older, Shift+Enter newer, Esc) | Ctrl+Shift+F | Cmd+F |
+| open a link or file path | Ctrl+click | Cmd+click |
+
+On macOS, Ctrl+C still goes to the program and Option works as Meta (Option+B / F move by word).
+
+## In the shell
+
+The integration covers bash (4+), zsh and PowerShell. Other shells (cmd.exe, WSL, fish) start plainly.
 
 - `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character.
-- `kyubey` opens a root shell as Kyubey; `exit` brings her back.
-- `pair` lays out Madoka | Homura; `magica` all five (Madoka, Homura above; Sayaka, Mami, Kyoko below).
-- `crush` opens Magica Crush in that pane: a pixel-art match-3 game with the five soul gems. Esc or q goes back to
-  the prompt.
-- `note` opens the notepad over that pane: one plain sheet in the theme and her colour. It saves as you type to
-  `~/.config/magica-terminal/note.txt` (Ctrl+S saves now, Ctrl+Z / Ctrl+Shift+Z undo / redo) and Esc goes back to the
-  prompt. `<head>Title<head>` makes a header (a bit larger, bold, underlined) and `*word*` makes a word bold; the
-  tags stay hidden unless the cursor is on them, and the headers are listed down the left to jump to. While it's open the window stays on top of other windows, so a small window works as a sticky note. GNOME on
-  Wayland doesn't let windows keep themselves on top, so `install.sh` adds a small GNOME Shell extension
-  (`gnome-extension/`) that does it for her; log out and back in once to load it. `note buy milk` adds a line to it without opening it;
-  `magica-terminal --note` opens a window with the notepad in its first pane.
-- `browser [address or search]` opens a web page over that pane (Linux only, WebKitGTK). ✕ or Ctrl+Shift+W
-  goes back to the prompt; Ctrl+L address bar, Alt+Left / Right back / forward, F5 reload. A video's full screen
-  fills the pane (Esc leaves it). Logins and cookies are kept in `~/.local/share/magica-terminal/web`.
-- `space [folder]` shows what takes up the disk there (Linux only): every item with a bar for its size, biggest
-  first, filling in while it scans. Click a folder (or `..`) to go into it, double-click a file to open it;
-  Backspace goes up (past where you started, too), C cds the shell into the folder on show, Esc or q goes back.
-- `attach` puts another app's window (a QEMU display, say) over that pane (GNOME only): the mouse turns into a crosshair;
-  click the window. `attach qemu` takes the latest window whose title or app has "qemu" in it instead. It sits under a
-  small bar with its title, moves and resizes with the pane, comes to the front with the terminal, and is minimized while
-  its tab isn't showing. F or the lock button (or `attach --freeze …`) freezes it: you can watch it, but clicks on it and
-  focus go back to the terminal. ✕ or Ctrl+Shift+W puts it back where it was; closing it closes the bar. Placing another
-  app's window needs the GNOME Shell extension (`install.sh` adds it; after updating, log out and back in once). If QEMU
-  has grabbed the mouse, Ctrl+Alt+G lets go of it; `-display gtk,zoom-to-fit=on` scales the guest to the pane.
-- `wl-copy` in a pane (how Claude Code, editors and scripts copy on Wayland) is the terminal's own (`shell/bin/wl-copy`):
-  the terminal puts the text on the clipboard itself, so GNOME doesn't pop up a "… is ready" notification on every copy.
-  Images and other non-text types, and copies from inside tmux / screen, still go to the real `wl-copy`.
-- In a folder with a `.env`, its `KEY=value` lines are set in the shell (the first time, she asks; `y` / `n` is
-  remembered per folder in `~/.config/magica-terminal/env-trust`, delete its line to be asked again). Leaving the
-  folder, into a subfolder too, puts every key back as it was. The file is only read, never run; editing it while
-  you're there reloads it at the next prompt. Linux (bash) only.
-- A character sits translucent behind the text (`figure_opacity`, 0.35). `hover_opacity` and `text_opacity` (both off
-  by default) fade her further while the mouse is over her or while there's text in front of her.
+- `kyubey` opens a root shell as Kyubey (`sudo`; on Windows `sudo` or `gsudo`); `exit` brings her back.
+- `pair` lays out Madoka | Homura; `magica` all five (in a new tab if the current one is split).
+- `crush` opens Magica Crush in that pane (see below). Esc or q goes back to the prompt.
+- `note` opens the notepad over that pane: one plain sheet in the theme and her colour, saved as you type to
+  `note.txt` in the config folder. `<head>Title<head>` makes a header (listed down the left, click to jump) and
+  `*word*` makes a word bold; the tags show only while the cursor is on them. Ctrl+Z / Cmd+Z undoes. While it's open
+  the window stays on top of other windows, so a small window works as a sticky note. `note buy milk` adds a line
+  without opening it.
+- `space [folder]` shows what takes up the disk there: every item with a bar for its size, biggest first, filling in
+  while it scans. Click a folder to go in, double-click a file to open it, Backspace goes up (past where you started,
+  too), C cds the shell there, Esc or q goes back.
+- In a folder with a `.env`, its `KEY=value` lines are set in the shell. The first time, she asks; `y` / `n` is
+  remembered per folder in `env-trust` in the config folder (delete its line to be asked again). Leaving the folder
+  puts every key back as it was. The file is only read, never run.
 
-Magica Crush: swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a
-striped gem (clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a
-Kyubey bomb (swap it with a gem to clear every gem of that colour). Swapping two specials together combines them, and
-chains score more each step. Gems dropping in during a chain are a bit lucky (some copy a neighbour, a few
-arrive striped), less so each step, so long chains of special clears happen but don't go on forever. It's endless, with
-the best score kept in `~/.config/magica-terminal/crush.json`. Press A to let it play itself (A again, or a click, takes back
-over); `"crush_autoplay": true` in the settings starts every game that way. A game autoplay has touched doesn't set a best
-score.
+From outside, `magica-terminal --crush` or `--note` opens a window with the game or notepad, and
+`magica-terminal -e CMD…` runs a command in its first pane. Typed inside a Magica pane, `--crush` and `--note` open in
+that pane.
+
+## Her
+
+She stands translucent behind the text and reacts to what you run: a small jump when a command succeeds, a red squash
+when it fails, three hops (plus a notification if the window isn't focused) when a long command finishes in a pane you
+weren't looking at, and an occasional bob or breath while idle.
 
 The window draws its own title bar: a dot and `name@magica` in the focused pane's colour, and the folder her shell is
-in (as the prompt shows it).
+in.
 
-She reacts to what you run: a small jump when a command succeeds, a red squash when it fails, three hops (plus a
-notification if the window isn't focused) when a long command finishes in a pane you weren't looking at, and an
-occasional bob or breath while idle.
+Programs that ask the terminal for its background colour or light/dark mode get the current theme's answer and are
+told when it flips. In Claude Code, pick **Auto (match terminal)** in `/theme`.
 
-Programs that ask the terminal for its background colour or light/dark mode get the current theme's answer, and are
-told when Ctrl+Shift+L switches it. In Claude Code, pick **Auto (match terminal)** in `/theme`. Its fixed `dark` theme draws
-pale text that is hard to read on the light background.
+## Magica Crush
 
-Most settings (figure size, hop heights, idle timing, failure flash, font, …) can be changed in
-`~/.config/magica-terminal/settings.json` (`%APPDATA%\magica-terminal\settings.json` on Windows), using the lower-case names of
-the constants at the top of `magica-terminal` (or `windows/renderer.js`):
+Swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a striped gem
+(clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a Kyubey bomb
+(swap it with a gem to clear every gem of that colour). Swapping two specials together combines them, and chains score
+more each step. It's endless, with the best score kept in `crush.json`. A lets it play itself; a game autoplay has
+touched doesn't set a best score.
+
+## Settings and files
+
+The config folder is `~/.config/magica-terminal/` on Linux, `~/Library/Application Support/magica-terminal/` on macOS
+and `%APPDATA%\magica-terminal\` on Windows. `settings.json` there overrides the defaults in
+[`app/core/src/settings.rs`](app/core/src/settings.rs) by their lower-case names, for example:
 
 ```json
-{ "idle_bob": 16, "idle_every": [4, 8], "notify": false }
+{ "font": "Maple Mono 12", "figure_opacity": 0.5, "idle_every": [4, 8], "notify": false }
 ```
 
-Changes apply to new windows. Unknown names and bad values are ignored with a warning.
+Changes apply to new windows; unknown names and bad values are ignored with a warning. The font is Maple Mono (SIL Open
+Font License), bundled with the app.
 
-Settings, the theme, the session, the note and Crush's best score are saved through a temporary file renamed over the
-old one, so a crash mid-save never leaves a half-written file.
+Closing the window saves the tabs, splits, characters, folders and what's in each pane (its last 2000 lines, plain
+text) to `session.json`, readable only by you since that text can hold secrets. The next launch restores them, each
+pane's old text above a faint "restored" line. A pane that had a coding agent running gets it back: Claude Code that
+exact conversation, Codex and opencode that folder's latest session. A full-screen app open at the time (vim, say)
+comes back as a copy of its last screen. A second window opened while one is running starts fresh.
 
-Closing the window saves tabs, splits, characters, folders and what's in each pane (its last 2000 lines, as plain
-text, no colours) to `~/.config/magica-terminal/session.json` (readable only by you, since that text can hold
-secrets); the next launch restores them, each pane's old text above a faint "restored" line and a fresh prompt.
-A pane that had a coding agent running gets it back instead, at its first prompt (quitting it leaves you in the
-shell): Claude Code that exact conversation (`claude --resume <id>`, found through `~/.claude/sessions/`); Codex and
-opencode don't say which process has which session, so that folder's latest one (`codex resume --last`,
-`opencode --continue`). Two of them in one folder both get the latest. Any other full-screen app open at
-the time (vim, say) comes back as a copy of its last screen.
+Everything is saved through a temporary file renamed over the old one, so a crash mid-save never leaves a half-written
+file.
 
-## Windows
+## Known limits
 
-`windows/` holds a Windows port (Electron + xterm.js + ConPTY, with PowerShell integration). See
-[windows/README.md](windows/README.md).
+- GNOME on Wayland doesn't let a window keep itself on top, so the notepad may not stay above other windows there.
+- macOS: bash integration needs bash 4+ (Homebrew's); the stock zsh is fully supported.
+- Windows: Git Bash, cmd.exe and WSL start without the integration; use PowerShell (pwsh 7 if installed).
 
-## Files
+## Development
 
-- `magica-terminal`: the app (single Python file; settings are the constants at the top)
-- `shell/magica.bash`: prompt, character commands and command start/end reporting, sourced from `~/.bashrc`
-- `shell/root-prompt.sh`: Kyubey's root prompt, to append to `/root/.bashrc`
-- `figures/`: one PNG per character
-- `magica-terminal.desktop`: launcher template used by `install.sh`
-- `gnome-extension/`: the GNOME Shell helper (keeps the notepad on top, places `attach`ed windows)
+`app/` holds it all: `core/` (Rust: terminals, shells, session, agents, disk scan, settings, command line),
+`src-tauri/` (the Tauri app and its commands), `src/` (the window, in TypeScript), `shell/` (the bash, zsh and
+PowerShell integration) and `public/` (figures and font).
+
+```sh
+cd app
+npm ci
+npm run tauri dev   # run from the source
+npm test            # front end and shell integration
+cargo test          # Rust
+```
+
+`docs/os-checklist.md` is the hand check for each OS.

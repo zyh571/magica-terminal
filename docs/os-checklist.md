@@ -9,7 +9,7 @@ note what you saw. Then one round of fixes follows.
 (`brew install node`). Then, in the checkout:
 
 ```sh
-cd app && ./install.sh
+./install.sh
 ```
 
 The first launch: right-click `~/Applications/Magica Terminal.app` → Open (it's unsigned).
@@ -19,11 +19,11 @@ The first launch: right-click `~/Applications/Magica Terminal.app` → Open (it'
 ```powershell
 winget install Rustlang.Rustup OpenJS.NodeJS.LTS
 winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-cd app; .\install.ps1
+.\install.ps1
 ```
 
 If SmartScreen complains, choose More info → Run anyway. Start it from the Start Menu ("Magica Terminal") or as
-`magica-dev`.
+`magica-terminal`.
 
 ## The checks (each OS)
 
@@ -61,7 +61,7 @@ Keys below are written as macOS / Windows.
 
 ### Commands
 - [ ] `crush` opens Magica Crush: swap gems by click and by drag, specials appear, A toggles autoplay, Esc goes back; the best score survives a restart
-- [ ] `magica-dev --crush` in a pane opens the game there; from outside (a plain terminal / Run box) it opens a new window with it
+- [ ] `magica-terminal --crush` in a pane opens the game there; from outside (a plain terminal / Run box) it opens a new window with it
 - [ ] `note` opens the notepad: text saves as you type, `<head>Title<head>` makes a header listed on the left (click jumps), `*word*` is bold, tags show only where the cursor is, Cmd+Z / Ctrl+Z undoes, Esc goes back
 - [ ] While the notepad is open, the window stays above other windows
 - [ ] `note buy milk` adds a line without opening it (`noted`)
@@ -76,7 +76,7 @@ Keys below are written as macOS / Windows.
 - [ ] A second window opened while one is running starts fresh (no restore)
 
 ### Settings
-- [ ] `settings.json` in `~/Library/Application Support/magica-terminal-dev/` (macOS) or `%APPDATA%\magica-terminal-dev\` (Windows) with `{"figure_opacity": 0.8}` makes her more solid in new windows
+- [ ] `settings.json` in `~/Library/Application Support/magica-terminal/` (macOS) or `%APPDATA%\magica-terminal\` (Windows) with `{"figure_opacity": 0.8}` makes her more solid in new windows
 
 ## Known limits
 

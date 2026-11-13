@@ -1,7 +1,7 @@
 # Build and install Magica Terminal from this checkout (Windows). Run it again after `git pull` or an edit.
 #   .\install.ps1
 $ErrorActionPreference = 'Stop'
-$dir = $PSScriptRoot
+$dir = Join-Path $PSScriptRoot 'app'
 $binName = ([regex]::Match((Get-Content -Raw (Join-Path $dir 'core\src\paths.rs')), 'pub const BIN_NAME: &str = "(.*)";')).Groups[1].Value
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
@@ -27,6 +27,7 @@ try {
 $target = Join-Path $env:LOCALAPPDATA 'Programs\magica-terminal'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item -Force (Join-Path $dir "target\release\$binName.exe") $target
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $target 'magica-dev.exe')   # the pre-release name
 # the shell scripts sit next to the exe (Tauri's resource folder for an unbundled build)
 Copy-Item -Recurse -Force (Join-Path $dir 'shell') $target
 
@@ -39,6 +40,8 @@ $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Magica Terminal.lnk
 $shell = New-Object -ComObject WScript.Shell
 $s = $shell.CreateShortcut($lnk)
 $s.TargetPath = Join-Path $target "$binName.exe"
+$s.Arguments = ''   # the old Electron shortcut passed its folder (its Ctrl+Alt+T key is kept)
+$s.IconLocation = Join-Path $target "$binName.exe"
 $s.WorkingDirectory = $env:USERPROFILE
 $s.Save()
 Write-Host "installed $target\$binName.exe and a Start Menu shortcut"

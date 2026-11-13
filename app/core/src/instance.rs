@@ -22,9 +22,9 @@ mod tests {
 
     #[test]
     fn finds_another_process_by_name() {
-        let names = ["bash", "magica-dev", "magica-dev"];
-        assert!(other_running_in(names.iter().enumerate().map(|(i, n)| (i as u32, n.to_string())), 1, "magica-dev"));
-        assert!(!other_running_in(names.iter().enumerate().map(|(i, n)| (i as u32, n.to_string())).take(2), 1, "magica-dev"));
-        assert!(other_running_in([(5, "magica-dev.exe".to_string())].into_iter(), 1, "magica-dev"));
+        let names = ["bash", "magica-terminal", "magica-terminal"];
+        assert!(other_running_in(names.iter().enumerate().map(|(i, n)| (i as u32, n.to_string())), 1, "magica-terminal"));
+        assert!(!other_running_in(names.iter().enumerate().map(|(i, n)| (i as u32, n.to_string())).take(2), 1, "magica-terminal"));
+        assert!(other_running_in([(5, "magica-terminal.exe".to_string())].into_iter(), 1, "magica-terminal"));
     }
 }
