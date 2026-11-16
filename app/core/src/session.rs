@@ -17,6 +17,12 @@ pub fn save(path: &Path, json: &str) -> bool {
     serde_json::from_str::<Value>(json).is_ok() && write_file(path, json, true)
 }
 
+/// Whether a window owns the saved session: restores it at start, and may forget it when its last shell exits.
+/// A window running a command, or opened while another is open, starts fresh and leaves the saved session alone.
+pub fn owns(command: bool, other_window: bool) -> bool {
+    !command && !other_window
+}
+
 /// Forget it (the last shell exited).
 pub fn clear(path: &Path) {
     write_file(path, r#"{"tabs": []}"#, true);
@@ -25,6 +31,14 @@ pub fn clear(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_plain_first_window_owns_it() {
+        assert!(owns(false, false));
+        assert!(!owns(true, false)); // `magica-terminal -e htop`: quitting htop mustn't wipe the saved tabs
+        assert!(!owns(false, true)); // another window is open: it saves its own tabs when it closes
+        assert!(!owns(true, true));
+    }
 
     #[test]
     fn missing_or_corrupt_is_none() {

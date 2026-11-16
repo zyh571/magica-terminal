@@ -28,6 +28,7 @@ async function main() {
     os: start.os,
     home: start.home,
     windowsBuild: start.windows_build,
+    ownsSession: start.owns_session,
     theme,
     themeSetting: chosen === "light" || chosen === "dark" ? chosen : "system",
   });

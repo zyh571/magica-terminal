@@ -26,6 +26,7 @@ struct Startup {
     home: String,
     /// Windows' build number (xterm.js needs it to work with ConPTY on resize); None elsewhere.
     windows_build: Option<u32>,
+    owns_session: bool,
 }
 
 #[derive(Serialize)]
@@ -156,14 +157,15 @@ pub fn run(overlay: Option<Overlay>, command: Option<Vec<String>>) {
     for w in warnings {
         eprintln!("magica-terminal: {}: {w}", paths::file("settings.json").display());
     }
-    // a command or another Magica Terminal already open: start fresh, don't restore
-    let restore = if command.is_none() && !instance::other_running() { session::load(&paths::file("session.json")) } else { None };
+    let owns_session = session::owns(command.is_some(), instance::other_running());
+    let restore = if owns_session { session::load(&paths::file("session.json")) } else { None };
     let startup = Startup {
         overlay,
         command,
         os: if cfg!(target_os = "macos") { "mac" } else if cfg!(windows) { "windows" } else { "linux" },
         home: dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default(),
         windows_build: if cfg!(windows) { sysinfo::System::kernel_version().and_then(|v| v.trim().parse().ok()) } else { None },
+        owns_session,
     };
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())

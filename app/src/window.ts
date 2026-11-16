@@ -23,6 +23,8 @@ export interface WindowOpts {
   os: "linux" | "mac" | "windows";
   home: string;
   windowsBuild: number | null;
+  /** This window restored the saved session and may clear it (session::owns on the Rust side). */
+  ownsSession: boolean;
   theme: ThemeName;
   themeSetting: "light" | "dark" | "system";
 }
@@ -32,6 +34,7 @@ export class MagicaWindow implements WindowHost {
   readonly os: "linux" | "mac" | "windows";
   readonly home: string;
   readonly windowsBuild: number | null;
+  private readonly ownsSession: boolean;
   private themeName: ThemeName;
   private tabs: Tab[] = [];
   private current = -1;
@@ -53,6 +56,7 @@ export class MagicaWindow implements WindowHost {
     this.os = o.os;
     this.home = o.home;
     this.windowsBuild = o.windowsBuild;
+    this.ownsSession = o.ownsSession;
     this.themeName = o.theme;
     this.font = parseFont(o.settings.font);
     document.body.dataset.os = o.os;
@@ -261,7 +265,8 @@ export class MagicaWindow implements WindowHost {
       tab.label.remove();
       if (!this.tabs.length) {   // every shell exited: nothing to restore next time
         this.closing = true;
-        clearSession().finally(() => this.appWindow.destroy());
+        // only the window that owns the saved session may forget it (see session::owns)
+        (this.ownsSession ? clearSession() : Promise.resolve()).finally(() => this.appWindow.destroy());
         return;
       }
       this.showTab(Math.min(i, this.tabs.length - 1));
