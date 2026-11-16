@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { Terminal } from "@xterm/headless";
-import { historyText, readTree, restoredText, HISTORY_LINES } from "./session";
+import { historyText, readTree, restoredText, tabName, HISTORY_LINES } from "./session";
 
 describe("restored text", () => {
   test("lines and marker", () => {
@@ -55,5 +55,19 @@ describe("reading a saved tree", () => {
     expect(readTree({ char: "nobody" })).toEqual({ kind: "pane", char: "madoka", cwd: undefined, text: undefined, resume: undefined });
     expect(readTree({ orient: "x", a: {}, b: {} })).toBeNull();
     expect(readTree({ orient: "h", ratio: 7, a: { char: "mami" }, b: { char: "kyoko" } })).toMatchObject({ ratio: 0.5 });
+  });
+});
+
+describe("tab names", () => {
+  test("a saved name comes back, tidied", () => {
+    expect(tabName({ name: "  deploy fix  ", char: "mami" })).toBe("deploy fix");
+    expect(tabName({ name: "x".repeat(80) })).toBe("x".repeat(40));
+    expect(tabName({ name: "a\nb\tc" })).toBe("a b c");
+  });
+  test("no name, an empty one or a non-string one is none", () => {
+    expect(tabName({ char: "mami" })).toBeUndefined();
+    expect(tabName({ name: "   " })).toBeUndefined();
+    expect(tabName({ name: 7 })).toBeUndefined();
+    expect(tabName(null)).toBeUndefined();
   });
 });

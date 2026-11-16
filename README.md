@@ -40,6 +40,7 @@ Run the installer again after `git pull` or an edit. It also removes what the ol
 | new tab | Ctrl+Shift+T | Cmd+T |
 | previous / next tab | Ctrl+PageUp / PageDown | Cmd+Shift+[ / ] |
 | tab 1…8 / last tab | Ctrl+1…8 / Ctrl+9 | Cmd+1…8 / Cmd+9 |
+| rename tab (or double-click it; empty name goes back to hers) | Ctrl+Shift+R | Cmd+Shift+R |
 | copy / paste | Ctrl+Shift+C / V | Cmd+C / V |
 | font size | Ctrl+Shift+Plus / Minus / 0 | Cmd+Plus / Minus / 0 |
 | light / dark | Ctrl+Shift+L | Cmd+Shift+L |
@@ -105,7 +106,7 @@ and `%APPDATA%\magica-terminal\` on Windows. `settings.json` there overrides the
 Changes apply to new windows; unknown names and bad values are ignored with a warning. The font is Maple Mono (SIL Open
 Font License), bundled with the app.
 
-Closing the window saves the tabs, splits, characters, folders and what's in each pane (its last 2000 lines, plain
+Closing the window saves the tabs (and their names), splits, characters, folders and what's in each pane (its last 2000 lines, plain
 text) to `session.json`, readable only by you since that text can hold secrets. The next launch restores them, each
 pane's old text above a faint "restored" line. A pane that had a coding agent running gets it back: Claude Code that
 exact conversation, Codex and opencode that folder's latest session. A full-screen app open at the time (vim, say)

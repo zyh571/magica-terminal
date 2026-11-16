@@ -8,7 +8,7 @@ import { clearSession, paneResume, saveSession, writeText } from "./ipc";
 import { actionFor, type Action } from "./keys";
 import { build, LAYOUTS, neighbour, Node, paneIds, remove, split } from "./layout";
 import { Pane, type PaneOpts, type WindowHost } from "./pane";
-import { readTree, type SavedNode } from "./session";
+import { cleanTabName, readTree, tabName, TAB_NAME_MAX, type SavedNode } from "./session";
 import { parseFont, type Settings } from "./settings";
 import { THEMES, type ThemeName } from "./theme";
 
@@ -16,6 +16,8 @@ interface Tab {
   root: Node;
   el: HTMLElement;
   label: HTMLElement;
+  /** Given by the user (double-click the tab, or Ctrl+Shift+R / Cmd+Shift+R); else it's named after her. */
+  name?: string;
 }
 
 export interface WindowOpts {
@@ -163,15 +165,17 @@ export class MagicaWindow implements WindowHost {
     return p;
   }
 
-  private addTab(root: Node) {
+  private addTab(root: Node, name?: string) {
     const el = document.createElement("div");
     el.className = "tab";
     const label = document.createElement("button");
     label.tabIndex = -1;
-    label.addEventListener("click", () => this.showTab(this.tabs.findIndex((t) => t.el === el)));
+    const index = () => this.tabs.findIndex((t) => t.el === el);
+    label.addEventListener("click", () => this.showTab(index()));
+    label.addEventListener("dblclick", () => this.renameTab(index()));
     this.tabBar.append(label);
     this.stage.append(el);
-    this.tabs.push({ root, el, label });
+    this.tabs.push({ root, el, label, name });
     this.render(this.tabs.length - 1);
     this.showTab(this.tabs.length - 1);
   }
@@ -183,7 +187,7 @@ export class MagicaWindow implements WindowHost {
       t.el.hidden = j !== i;
       t.label.classList.toggle("current", j === i);
     });
-    this.tabBar.hidden = this.tabs.length < 2;
+    this.updateTabBar();
     const first = paneIds(this.tabs[i].root).map((id) => this.panes.get(id)!);
     requestAnimationFrame(() => first.forEach((p) => p.layout()));
     const target = first.includes(this.active!) ? this.active! : first[0];
@@ -333,8 +337,46 @@ export class MagicaWindow implements WindowHost {
     this.tabs.forEach((t, i) => {
       const ids = paneIds(t.root);
       const first = this.panes.get(ids[0]);
-      t.label.textContent = ids.length > 1 ? `Tab ${i + 1}` : first ? first.character[0].toUpperCase() + first.character.slice(1) : "";
+      t.label.textContent = t.name ?? (ids.length > 1 ? `Tab ${i + 1}` : first ? first.character[0].toUpperCase() + first.character.slice(1) : "");
     });
+  }
+
+  /** The tab bar shows with two tabs or more, or once a tab has a name (so the name stays in sight). */
+  private updateTabBar() {
+    this.tabBar.hidden = this.tabs.length < 2 && !this.tabs.some((t) => t.name) && !this.tabBar.querySelector(".tab-name");
+  }
+
+  /** Edit tab i's name in place: Enter or clicking away keeps it, Esc cancels, an empty name goes back to hers. */
+  private renameTab(i: number) {
+    const t = this.tabs[i];
+    if (!t || this.tabBar.querySelector(".tab-name")) return;
+    const input = document.createElement("input");
+    input.className = "tab-name";
+    input.value = t.label.textContent ?? "";
+    input.maxLength = TAB_NAME_MAX;
+    input.spellcheck = false;
+    input.setAttribute("aria-label", "Tab name");
+    t.label.hidden = true;
+    t.label.after(input);
+    this.tabBar.hidden = false;
+    input.focus();
+    input.select();
+    let done = false;
+    const finish = (keep: boolean) => {
+      if (done) return;
+      done = true;
+      if (keep) t.name = cleanTabName(input.value);
+      input.remove();
+      t.label.hidden = false;
+      this.updateTabLabels();
+      this.updateTabBar();
+      if (this.active) this.focusPane(this.active);
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(true));
   }
 
   private applyThemeCss() {
@@ -367,7 +409,8 @@ export class MagicaWindow implements WindowHost {
     // copy / paste / search inside the notepad or `space` are their own
     const inOverlay = this.active?.overlay && (a === "copy" || a === "paste" || a === "search");
     const inSearch = this.active?.hasSearch() && (a === "copy" || a === "paste");
-    if (inOverlay || inSearch) return;
+    const inName = document.activeElement?.classList.contains("tab-name") && (a === "copy" || a === "paste");
+    if (inOverlay || inSearch || inName) return;
     e.preventDefault();
     e.stopPropagation();
     this.perform(a);
@@ -399,6 +442,7 @@ export class MagicaWindow implements WindowHost {
       case "fontDown": return this.setFontScale(this.fontScale / 1.1);
       case "fontReset": return this.setFontScale(1);
       case "toggleTheme": return this.setTheme(this.themeName === "dark" ? "light" : "dark");
+      case "renameTab": return this.renameTab(this.current);
       case "search": return p?.openSearch();
     }
   }
@@ -419,7 +463,10 @@ export class MagicaWindow implements WindowHost {
     const data = {
       size: [Math.round(size.width / scale), Math.round(size.height / scale)],
       current: this.current,
-      tabs: await Promise.all(this.tabs.map((t) => this.serialize(t.root))),
+      tabs: await Promise.all(this.tabs.map(async (t) => {
+        const tree = await this.serialize(t.root);
+        return t.name ? { ...(tree as object), name: t.name } : tree;
+      })),
     };
     await saveSession(JSON.stringify(data, null, 1));
   }
@@ -427,15 +474,16 @@ export class MagicaWindow implements WindowHost {
   /** Bring back a saved session; false (and nothing changed) if it isn't usable. */
   restore(data: unknown): boolean {
     const d = data as { tabs?: unknown[]; current?: number } | null;
-    const trees = (d?.tabs ?? []).map(readTree).filter((t): t is SavedNode => t !== null);
+    const trees = (d?.tabs ?? []).map((raw) => ({ tree: readTree(raw), name: tabName(raw) }))
+      .filter((t): t is { tree: SavedNode; name: string | undefined } => t.tree !== null);
     if (!trees.length) return false;
-    for (const tree of trees) {
+    for (const { tree, name } of trees) {
       const make = (n: SavedNode): Node => {
         if (n.kind === "split") return { kind: "split", orient: n.orient, ratio: n.ratio, a: make(n.a), b: make(n.b) };
         const p = this.makePane({ character: n.char, cwd: n.cwd, text: n.resume ? undefined : n.text, resume: n.resume });
         return { kind: "pane", id: p.id };
       };
-      this.addTab(make(tree));
+      this.addTab(make(tree), name);
     }
     this.showTab(Math.min(Math.max(0, d?.current ?? 0), this.tabs.length - 1));
     return true;

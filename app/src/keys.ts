@@ -2,7 +2,7 @@
 // macOS: Cmd, the usual Mac way. Anything else goes to the program in the pane.
 export type Action =
   | "splitRight" | "splitDown" | "close" | "newTab" | "prevTab" | "nextTab" | "copy" | "paste"
-  | "fontUp" | "fontDown" | "fontReset" | "toggleTheme" | "search"
+  | "fontUp" | "fontDown" | "fontReset" | "toggleTheme" | "search" | "renameTab"
   | { tab: number }
   | { move: [number, number] };
 
@@ -39,6 +39,7 @@ export function actionFor(e: KeyLike, os: Os = OS): Action | null {
       switch (e.code) {
         case "KeyD": return "splitDown";
         case "KeyL": return "toggleTheme";
+        case "KeyR": return "renameTab";
         case "BracketLeft": return "prevTab";
         case "BracketRight": return "nextTab";
       }
@@ -70,6 +71,7 @@ export function actionFor(e: KeyLike, os: Os = OS): Action | null {
       case "KeyV": return "paste";
       case "KeyL": return "toggleTheme";
       case "KeyF": return "search";
+      case "KeyR": return "renameTab";
     }
     return null;
   }

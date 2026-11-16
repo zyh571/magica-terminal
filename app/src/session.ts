@@ -50,6 +50,21 @@ const RESUME = /^(claude:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 /** A saved tree (from session.json), checked: unknown characters and root shells come back as Madoka, odd ratios as
  * halves, resume values only if they're one of the known forms. null if it's not a tree. */
+/** The longest tab name kept. */
+export const TAB_NAME_MAX = 40;
+
+/** A tab's name: what was typed, on one line, trimmed and cut to TAB_NAME_MAX; none if that leaves nothing. */
+export function cleanTabName(s: string): string | undefined {
+  const name = s.replace(/\s+/g, " ").trim().slice(0, TAB_NAME_MAX).trim();
+  return name || undefined;
+}
+
+/** The name saved with a tab (on its tree's top node), if any. */
+export function tabName(v: unknown): string | undefined {
+  const name = v && typeof v === "object" ? (v as Record<string, unknown>).name : undefined;
+  return typeof name === "string" ? cleanTabName(name) : undefined;
+}
+
 export function readTree(v: unknown): SavedNode | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;

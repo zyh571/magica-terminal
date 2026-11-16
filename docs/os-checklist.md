@@ -38,6 +38,7 @@ Keys below are written as macOS / Windows.
 - [ ] Dragging the line between two panes resizes them
 - [ ] Cmd+W / Ctrl+Shift+W closes a pane; `exit` in the last one closes the window
 - [ ] Cmd+T / Ctrl+Shift+T opens a tab in the same folder; Cmd+Shift+[ ] / Ctrl+PageUp/Down and Cmd+1…9 / Ctrl+1…9 switch tabs
+- [ ] Cmd+Shift+R / Ctrl+Shift+R (or double-clicking a tab) renames the tab: Enter keeps it, Esc cancels, an empty name goes back to hers; with one named tab the tab bar stays visible; the name comes back with the session
 - [ ] Cmd+C / Ctrl+Shift+C copies the selection; Cmd+V / Ctrl+Shift+V pastes
 - [ ] Ctrl+C in a running `ping` stops it (it goes to the program, also on macOS)
 - [ ] macOS: Option+B / Option+F move by word in the shell (Option acts as Meta)

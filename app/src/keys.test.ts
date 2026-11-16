@@ -24,6 +24,8 @@ describe("Linux / Windows", () => {
     expect(a("Digit0", "cs", ")")).toBe("fontReset");
     expect(a("KeyL", "cs")).toBe("toggleTheme");
     expect(a("KeyF", "cs")).toBe("search");
+    expect(a("KeyR", "cs")).toBe("renameTab");
+    expect(a("KeyR", "c")).toBeNull(); // Ctrl+R is the shell's history search
   });
   test("tabs and panes", () => {
     expect(a("PageUp", "c")).toBe("prevTab");
@@ -56,6 +58,7 @@ describe("macOS", () => {
     expect(a("Minus", "m", "-")).toBe("fontDown");
     expect(a("Digit0", "m", "0")).toBe("fontReset");
     expect(a("KeyL", "ms")).toBe("toggleTheme");
+    expect(a("KeyR", "ms")).toBe("renameTab");
     expect(a("KeyF", "m")).toBe("search");
     expect(a("BracketLeft", "ms", "{")).toBe("prevTab");
     expect(a("BracketRight", "ms", "}")).toBe("nextTab");
