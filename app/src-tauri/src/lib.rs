@@ -167,7 +167,7 @@ pub fn run(overlay: Option<Overlay>, command: Option<Vec<String>>) {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(move |app| {
-            let shell_dir = app.path().resource_dir().map(|d| d.join("shell")).unwrap_or_default();
+            let shell_dir = app.path().resource_dir().map(|d| paths::plain(d.join("shell"))).unwrap_or_default();
             app.manage(App {
                 settings: Value::Object(settings),
                 startup,

@@ -218,7 +218,13 @@ mod tests {
     fn real_processes() {
         let me = std::process::id();
         let t = ProcTable::snapshot();
-        let mut child = std::process::Command::new("sleep").arg("5").spawn().unwrap();
+        // Windows has no `sleep`; ping waits ~1 s between its 6 echoes.
+        let mut child = if cfg!(windows) {
+            std::process::Command::new("ping").args(["-n", "6", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn()
+        } else {
+            std::process::Command::new("sleep").arg("5").spawn()
+        }
+        .unwrap();
         let t2 = ProcTable::snapshot();
         assert!(t2.descendants(me).contains(&child.id()));
         let _ = t;

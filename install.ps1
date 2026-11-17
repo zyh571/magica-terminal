@@ -25,6 +25,10 @@ try {
 } finally { Pop-Location }
 
 $target = Join-Path $env:LOCALAPPDATA 'Programs\magica-terminal'
+if (Get-Process -Name $binName -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$target\*" }) {
+  Write-Host 'Magica Terminal is running; close its windows and run .\install.ps1 again.'
+  exit 1
+}
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item -Force (Join-Path $dir "target\release\$binName.exe") $target
 Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $target 'magica-dev.exe')   # the pre-release name

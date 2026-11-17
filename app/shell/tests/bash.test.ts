@@ -1,11 +1,11 @@
 // The bash script's side of the protocol (src/protocol.ts).
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { sandbox, Sandbox } from "./run";
+import { have, sandbox, Sandbox } from "./run";
 import { shellCases } from "./cases";
 
 shellCases("bash");
 
-describe("bash only", () => {
+describe.skipIf(!have("bash"))("bash only", () => {
   let sb: Sandbox;
   beforeEach(() => (sb = sandbox()));
   afterEach(() => sb.done());
