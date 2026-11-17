@@ -24,6 +24,8 @@ struct Startup {
     command: Option<Vec<String>>,
     os: &'static str,
     home: String,
+    /// Windows' build number (xterm.js needs it to work with ConPTY on resize); None elsewhere.
+    windows_build: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -161,6 +163,7 @@ pub fn run(overlay: Option<Overlay>, command: Option<Vec<String>>) {
         command,
         os: if cfg!(target_os = "macos") { "mac" } else if cfg!(windows) { "windows" } else { "linux" },
         home: dirs::home_dir().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default(),
+        windows_build: if cfg!(windows) { sysinfo::System::kernel_version().and_then(|v| v.trim().parse().ok()) } else { None },
     };
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())

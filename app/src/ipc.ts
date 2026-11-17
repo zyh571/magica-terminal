@@ -16,6 +16,7 @@ export interface Startup {
   command: string[] | null;
   os: "linux" | "mac" | "windows";
   home: string;
+  windows_build: number | null;
 }
 
 export async function spawnPane(opts: SpawnOpts, onData: (b: Uint8Array) => void, onExit: (code: number) => void): Promise<number> {

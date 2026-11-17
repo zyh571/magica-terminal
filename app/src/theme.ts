@@ -20,10 +20,12 @@ export const THEMES: Record<ThemeName, Theme> = {
       "#3a3029", "#d27a68", "#9cad7a", "#dcb468", "#8ca3bd", "#c095ae", "#8db5a8", "#d9cfbd",
       "#75695c", "#e3917f", "#b2c38f", "#ecc982", "#a4b9cf", "#d2abc1", "#a5c9bc", "#f5ecdc"],
   },
+  // (light is darker than a mirror of dark: dark text on a light ground reads thinner. Colours ≥ 6.5:1 on bg, the
+  // bright ones ≥ 5:1, white 3.6:1 and bright black 4.6:1)
   light: {
-    bg: "#f6efe1", fg: "#4a3f36", dim: "#a39886", sel_fg: "#fbf7ee", palette: [
-      "#3b322b", "#a8493c", "#5f7a43", "#8e6a1d", "#4b6684", "#8a5878", "#4b7a70", "#b4a993",
-      "#857a6b", "#c25a48", "#708d50", "#ad862b", "#5d7c9c", "#9e6a8c", "#5c9086", "#fbf7ee"],
+    bg: "#f6efe1", fg: "#3d342d", dim: "#847b6d", sel_fg: "#fbf7ee", palette: [
+      "#3b322b", "#8b3d32", "#475b32", "#6b5016", "#405771", "#714862", "#385b54", "#847c6c",
+      "#746a5d", "#a34c3c", "#576d3e", "#7f6220", "#4e6883", "#845975", "#466d66", "#fbf7ee"],
   },
 };
 
@@ -81,6 +83,28 @@ export function mix(a: string, b: string, t: number): string {
   return hex(...(ca.map((x, i) => x + (cb[i] - x) * t) as [number, number, number]));
 }
 
+function luminance(c: string): number {
+  const [r, g, b] = hexRgb(c).map((x) => {
+    x /= 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio, 1…21. */
+export function contrast(a: string, b: string): number {
+  const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+}
+
+/** `c` darkened (same hue and saturation) until it has at least `min` contrast on the light `bg`. */
+export function legibleOn(c: string, bg: string, min: number): string {
+  const rgb = hexRgb(c);
+  let out = c;
+  for (let k = 1; contrast(out, bg) < min && k > 0; k -= 0.01) out = hex(...(rgb.map((x) => x * k) as [number, number, number]));
+  return out;
+}
+
 /** Our 16 colours, then the standard xterm 6×6×6 cube and the grey ramp. */
 export function xterm256(base16: string[]): string[] {
   const steps = [0, 95, 135, 175, 215, 255];
@@ -102,15 +126,23 @@ export function palette(theme: ThemeName, s: Settings): string[] {
       return;
     }
     const col = theme === "dark" ? c.dark : c.light;
-    pal[at] = col;
-    pal[at + 1] = desaturate(col, s.text_saturation);
-    pal[at + 2] = desaturate(col, s.path_saturation);
+    // on light, desaturating greys her colour toward the background: keep it readable
+    const fix = (x: string) => (theme === "light" ? legibleOn(x, THEMES.light.bg, 5.5) : x);
+    pal[at] = fix(col);
+    pal[at + 1] = fix(desaturate(col, s.text_saturation));
+    pal[at + 2] = fix(desaturate(col, s.path_saturation));
   });
   return pal;
 }
 
-/** xterm.js's theme for a pane: her colour for the cursor and selection; the background is see-through (the pane draws it). */
-export function xtermTheme(theme: ThemeName, colour: string, focused: boolean, s: Settings): ITheme {
+/** Whether a pane's terminal is see-through. Dark: yes, her figure stands behind the text. Light: no, the terminal
+ * paints the pane's own background and she's blended over it (style.css): glyphs drawn on a see-through canvas are
+ * smoothed against nothing, which makes dark text on a light ground hairline-thin. */
+export const seeThrough = (theme: ThemeName) => theme === "dark";
+
+/** xterm.js's theme for a pane: her colour for the cursor and selection. The background is `paneBg` in light, and
+ * see-through in dark (the pane draws it). */
+export function xtermTheme(theme: ThemeName, colour: string, focused: boolean, s: Settings, paneBg: string = THEMES[theme].bg): ITheme {
   const t = THEMES[theme];
   const pal = palette(theme, s);
   const fg = focused ? t.fg : desaturate(t.fg, s.unfocused_saturation);
@@ -123,7 +155,9 @@ export function xtermTheme(theme: ThemeName, colour: string, focused: boolean, s
   return {
     ...base,
     foreground: fg,
-    background: "#00000000",
+    // see-through, but in the theme's colour: reverse video (a program's own cursor, a selected item) draws its text
+    // in the background colour made opaque, which from #00000000 was black
+    background: seeThrough(theme) ? t.bg + "00" : paneBg,
     cursor: colour,
     cursorAccent: t.bg,
     selectionBackground: colour,

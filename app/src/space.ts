@@ -69,7 +69,7 @@ export function openSpace(host: PaneHost, path: string, home: string): Overlay {
       return li;
     }));
     const shownPath = home && node.path.startsWith(home) ? "~" + node.path.slice(home.length) : node.path;
-    $<HTMLElement>(".path").textContent = shownPath;
+    $<HTMLElement>(".path").textContent = `‎${shownPath}‎`;   // (left-to-right in its right-to-left box: see window.ts)
     $<HTMLElement>(".summary").textContent = `${running ? "scanning… " : ""}${humanSize(node.size)} in ${items.length} items`;
     list.children[selected]?.scrollIntoView({ block: "nearest" });
     const t = THEMES[host.theme()];

@@ -9,11 +9,11 @@ export interface Character {
 }
 
 export const CHARACTERS: Character[] = [
-  { name: "madoka", icon: "🎀", dark: "#ff9cc6", light: "#c2386f" },
-  { name: "homura", icon: "⏳", dark: "#b9a0ff", light: "#6a4bb8" },
-  { name: "sayaka", icon: "🎵", dark: "#8cbcff", light: "#2f6fc0" },
-  { name: "mami", icon: "🫖", dark: "#f2cf6b", light: "#9a6f0e" },
-  { name: "kyoko", icon: "🍎", dark: "#ff7a86", light: "#c22f3c" },
+  { name: "madoka", icon: "🎀", dark: "#ff9cc6", light: "#a02e5c" },
+  { name: "homura", icon: "⏳", dark: "#b9a0ff", light: "#6447ae" },
+  { name: "sayaka", icon: "🎵", dark: "#8cbcff", light: "#265a9c" },
+  { name: "mami", icon: "🫖", dark: "#f2cf6b", light: "#75540b" },
+  { name: "kyoko", icon: "🍎", dark: "#ff7a86", light: "#a92934" },
 ];
 export const KYUBEY: Character = { name: "kyubey", icon: "", dark: "#f4f4f4", light: "#1f1f24" };
 export const ALL_CHARACTERS: Character[] = [...CHARACTERS, KYUBEY];

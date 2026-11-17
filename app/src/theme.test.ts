@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { desaturate, mix, palette, THEMES, xterm256 } from "./theme";
+import { contrast, desaturate, mix, palette, seeThrough, THEMES, xterm256, xtermTheme } from "./theme";
 import { DEFAULTS } from "./settings";
 import { slotOf } from "./characters";
 
@@ -42,8 +42,28 @@ describe("palette slots", () => {
   });
   test("light", () => {
     const p = palette("light", DEFAULTS);
-    expect(p[100]).toBe("#c2386f");
-    expect(p[101]).toBe("#a35775");
+    expect(p[100]).toBe("#a02e5c");
     expect(p[118]).toBe("#7a7a80");
+  });
+  test("light: her name, text and path colours stay readable however desaturated", () => {
+    for (const s of [DEFAULTS, { ...DEFAULTS, text_saturation: 0, path_saturation: 0.1 }]) {
+      const p = palette("light", s);
+      for (let i = 100; i < 115; i++) expect(contrast(p[i], THEMES.light.bg)).toBeGreaterThanOrEqual(5.5);
+    }
+  });
+  test("light: text, and the ANSI colours programs use for text, are readable", () => {
+    const t = THEMES.light;
+    expect(contrast(t.fg, t.bg)).toBeGreaterThanOrEqual(10);
+    [1, 2, 3, 4, 5, 6].forEach((i) => expect(contrast(t.palette[i], t.bg)).toBeGreaterThanOrEqual(6.5));
+    [9, 10, 11, 12, 13, 14].forEach((i) => expect(contrast(t.palette[i], t.bg)).toBeGreaterThanOrEqual(5));
+  });
+  test("dark: see-through, in the theme's colour (reverse video isn't black)", () => {
+    expect(seeThrough("dark")).toBe(true);
+    expect(xtermTheme("dark", "#ff9cc6", true, DEFAULTS, "#123456").background).toBe(THEMES.dark.bg + "00");
+  });
+  test("light: opaque, in the pane's own background (so text is smoothed against it)", () => {
+    expect(seeThrough("light")).toBe(false);
+    expect(xtermTheme("light", "#a02e5c", true, DEFAULTS, "#f0e6dc").background).toBe("#f0e6dc");
+    expect(xtermTheme("light", "#a02e5c", true, DEFAULTS).background).toBe(THEMES.light.bg);
   });
 });

@@ -22,6 +22,7 @@ export interface WindowOpts {
   settings: Settings;
   os: "linux" | "mac" | "windows";
   home: string;
+  windowsBuild: number | null;
   theme: ThemeName;
   themeSetting: "light" | "dark" | "system";
 }
@@ -30,6 +31,7 @@ export class MagicaWindow implements WindowHost {
   readonly settings: Settings;
   readonly os: "linux" | "mac" | "windows";
   readonly home: string;
+  readonly windowsBuild: number | null;
   private themeName: ThemeName;
   private tabs: Tab[] = [];
   private current = -1;
@@ -50,13 +52,14 @@ export class MagicaWindow implements WindowHost {
     this.settings = o.settings;
     this.os = o.os;
     this.home = o.home;
+    this.windowsBuild = o.windowsBuild;
     this.themeName = o.theme;
     this.font = parseFont(o.settings.font);
     document.body.dataset.os = o.os;
     root.innerHTML = `
       <header class="titlebar" data-tauri-drag-region>
         <span class="dot"></span><span class="who" data-tauri-drag-region></span><span class="where" data-tauri-drag-region></span>
-        <span class="buttons"><button class="min" title="Minimise">–</button><button class="max" title="Maximise">□</button><button class="close" title="Close">✕</button></span>
+        <span class="buttons"><button class="min" title="Minimise" tabindex="-1">–</button><button class="max" title="Maximise" tabindex="-1">□</button><button class="close" title="Close" tabindex="-1">✕</button></span>
       </header>
       <nav class="tabs" hidden></nav>
       <main class="stage"></main>`;
@@ -67,8 +70,16 @@ export class MagicaWindow implements WindowHost {
     root.querySelector(".min")!.addEventListener("click", () => this.appWindow.minimize());
     root.querySelector(".max")!.addEventListener("click", () => this.appWindow.toggleMaximize());
     root.querySelector(".close")!.addEventListener("click", () => this.appWindow.close());
-    root.style.setProperty("--radius", `${this.settings.window_radius}px`);
+    // the title bar's and tab bar's buttons never take the keyboard from the terminal (it went to □, Enter and all)
+    for (const bar of [root.querySelector(".titlebar")!, this.tabBar]) {
+      bar.addEventListener("mousedown", (e) => (e.target as HTMLElement).closest("button") && e.preventDefault());
+    }
+    // Windows 11 draws the window's 1px border (and shadow) round its own 8px corners: ours must be the same or the
+    // border and the fill part at the corners
+    root.style.setProperty("--radius", `${o.os === "windows" ? 8 : this.settings.window_radius}px`);
     document.addEventListener("keydown", (e) => this.onKey(e), true);
+    this.appWindow.onResized(() => this.fitMaximized()).catch(() => {});
+    this.fitMaximized();
     this.appWindow.onCloseRequested(async (e) => {
       if (this.closing) return;
       e.preventDefault();
@@ -77,6 +88,11 @@ export class MagicaWindow implements WindowHost {
       await this.appWindow.destroy();
     });
     this.applyThemeCss();
+  }
+
+  /** Maximised: square corners (rounded ones against the screen's edges looked chipped). */
+  private async fitMaximized() {
+    document.body.classList.toggle("maximized", await this.appWindow.isMaximized().catch(() => false));
   }
 
   // ── WindowHost ──
@@ -147,6 +163,7 @@ export class MagicaWindow implements WindowHost {
     const el = document.createElement("div");
     el.className = "tab";
     const label = document.createElement("button");
+    label.tabIndex = -1;
     label.addEventListener("click", () => this.showTab(this.tabs.findIndex((t) => t.el === el)));
     this.tabBar.append(label);
     this.stage.append(el);
@@ -300,7 +317,9 @@ export class MagicaWindow implements WindowHost {
     const p = this.active;
     if (!p) return;
     this.titleWho.textContent = `${p.character}@magica`;
-    this.titleWhere.textContent = p.where;
+    // (marked left-to-right at both ends: the box is right-to-left so a long path loses its start, which would
+    // otherwise move a leading "~\" to the end)
+    this.titleWhere.textContent = `‎${p.where}‎`;
     this.root.style.setProperty("--accent", p.colour());
     this.updateTabLabels();
   }

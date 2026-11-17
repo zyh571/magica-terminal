@@ -11,6 +11,7 @@ export interface FigureHost {
   name(): string;
   colour(): string;
   focused(): boolean;
+  active(): boolean;   // the window's current pane (stays so while the window is in the background)
   hidden(): boolean;   // the game or notepad covers the pane
   term(): Terminal;
   inkColours(): { fg: string; bg: string; palette: string[] };
@@ -131,7 +132,9 @@ export class Figure {
 
   private updateOpacity() {
     const s = this.host.settings;
-    const op = s.figure_opacity * (this.hovering ? s.hover_opacity : 1 - (1 - s.text_opacity) * Math.min(1, this.cover / Math.max(s.text_full, 0.01)));
+    // (the active pane's never fainter than the rest, even with figure_opacity set above active_figure_opacity)
+    const base = this.host.active() ? Math.max(s.active_figure_opacity, s.figure_opacity) : s.figure_opacity;
+    const op = base * (this.hovering ? s.hover_opacity : 1 - (1 - s.text_opacity) * Math.min(1, this.cover / Math.max(s.text_full, 0.01)));
     this.canvas.style.opacity = String(op);
     this.base.style.opacity = String(op);
   }

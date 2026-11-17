@@ -2,6 +2,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
 body { font-family: system-ui, sans-serif; font-size: 13px; }
+body.maximized #app { border-radius: 0; }
 
 #app {
   height: 100%;
@@ -58,11 +59,17 @@ body[data-os="mac"] .titlebar .buttons { display: none; }
 .figure, .figure-base { position: absolute; pointer-events: none; }
 .figure[hidden], .figure-base[hidden] { display: none; }
 .figure-base { border-radius: 99px; }
+/* light: the terminal is opaque (see seeThrough in theme.ts), so she's laid over the text, multiplied in: on the
+   cream she looks as she does behind it, and dark text over her stays dark */
+:root[data-theme="light"] .figure, :root[data-theme="light"] .figure-base { z-index: 2; mix-blend-mode: multiply; }
 .pane .term { position: absolute; inset: 0; }
 .pane .term .xterm { height: 100%; }
 .pane .xterm-viewport { background: transparent !important; }
-.pane .xterm-viewport::-webkit-scrollbar { width: 8px; }
-.pane .xterm-viewport::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--pane-bg), var(--dim) 45%); border-radius: 4px; }
+/* no scrollbar (it came up on focus and over her): neither the viewport's own nor xterm's; the wheel and
+   Shift+PageUp/Down still scroll */
+.pane .xterm-viewport { scrollbar-width: none; }
+.pane .xterm-viewport::-webkit-scrollbar { display: none; }
+.pane .xterm .xterm-scrollable-element > .scrollbar { display: none !important; }
 
 .pane .search {
   position: absolute; top: 8px; right: 8px; z-index: 6; width: 240px; padding: 5px 9px;
@@ -93,6 +100,10 @@ body[data-os="mac"] .titlebar .buttons { display: none; }
 .notes-body .cm-cursor { border-left-color: var(--her); }
 .notes-body .cm-selectionBackground, .notes-body .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--her) 45%, transparent) !important; }
 .notes-body .cm-placeholder { color: var(--dim); }
+/* thin scrollbars in the theme, not Windows' white ones */
+.overlay.notes ::-webkit-scrollbar, .overlay.space ::-webkit-scrollbar { width: 8px; height: 8px; background: transparent; }
+.overlay.notes ::-webkit-scrollbar-thumb, .overlay.space ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--bg), var(--dim) 45%); border-radius: 4px; }
+.overlay.notes ::-webkit-scrollbar-corner, .overlay.space ::-webkit-scrollbar-corner { background: transparent; }
 .notes-body .cm-head { font-weight: bold; text-decoration: underline; font-size: 1.2em; }
 .notes-body .cm-bold { font-weight: bold; }
 .notes-body .cm-tag { color: var(--dim); }

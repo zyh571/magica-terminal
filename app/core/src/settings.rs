@@ -12,7 +12,7 @@ pub fn defaults() -> Map<String, Value> {
         "padding": 10,
         "fig_height": 240, "fig_right": 30, "fig_bottom": 12,
         "base_height": 5, "base_gap": 4,
-        "figure_opacity": 0.35, "hover_opacity": 1, "text_opacity": 1, "text_full": 0.2, "text_contrast": 0.12,
+        "figure_opacity": 0.35, "active_figure_opacity": 0.6, "hover_opacity": 1, "text_opacity": 1, "text_full": 0.2, "text_contrast": 0.12,
         "fail_flash": 0.5, "fail_tint": 0.5, "fail_squash": 0.15, "fail_red": "#ff1f1f",
         "ignored_exit": [130],
         "long_command": 10, "hop_height": 22, "hops": 3, "jump_height": 20, "notify": true,

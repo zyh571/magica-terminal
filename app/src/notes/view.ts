@@ -50,7 +50,8 @@ export function openNotes(host: PaneHost): Overlay {
   status.className = "notes-status";
   el.append(side, body, status);
 
-  let dirty = false, timer = 0, loaded = false, titles = "";
+  // (titles starts as null, not "": a note without headers must still hide the empty side list the first time)
+  let dirty = false, timer = 0, loaded = false, titles: string | null = null;
   const save = async () => {
     clearTimeout(timer);
     timer = 0;

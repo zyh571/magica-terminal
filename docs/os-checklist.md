@@ -103,3 +103,38 @@ To do / decide:
       (`/c/Users/...`, `/tmp/...`) in OSC 7 and `space`, which `parseOsc7` doesn't convert. Support it (convert MSYS
       paths, or `cygpath -m` in `magica.bash`), or keep it out like cmd.exe and WSL.
 - [ ] The frontend bundle is 855 kB (Vite warns above 500 kB); code-split if start-up is slow.
+
+## Windows: second run (2026-11-18, Windows 11 build 26300, Windows PowerShell 5.1)
+
+Checked by hand (driven with real key events and screenshots): splits, Ctrl+Alt+Arrows, divider drag, Ctrl+Shift+W,
+tabs and Ctrl+PageUp, font size, search, light/dark, every character, `pair` / `magica`, a failing command's squash,
+Ctrl+C on `ping` / `Start-Sleep` (no squash), CJK and emoji widths, `crush`, `space`, `note` (always on top, Esc,
+`note buy milk`), `.env` load / unload, window corners, the bottom row at several sizes.
+
+Fixed in this round:
+- `magica` / `pair`: new panes could hang with no prompt and no typing. ConPTY asks for the cursor position as a
+  shell starts and waits; the answer was dropped if it came before the pane knew its pty id. Now held until then.
+- Lines doubled after a resize (font size, window): xterm now knows it's on ConPTY (`windowsPty`).
+- Black boxes behind dim / italic / underlined text (Claude Code's start): xterm's WebGL renderer painted them opaque
+  in the background colour (patched in `vite.config.ts`); reverse video was black text for the same reason.
+- Light mode: darker text and colours (≥ 6.5:1), and an opaque terminal so text isn't hairline-thin (her figure is
+  multiplied over it instead).
+- The last row ran into the bottom padding (the fit addon counted the padding as room).
+- Corners: 8px on Windows to match the border Windows 11 draws.
+- Notepad: an empty side strip without headers; Windows' white scrollbar. Title bar: `~\…` paths shown as `…\~`.
+
+Then also checked: the jump on success, idle bobs, three hops after `Start-Sleep 11` in an unwatched pane, the
+notification, copy / paste, Ctrl+click on a URL and a file path, – □ ✕, dragging the title bar, Ctrl+1…9,
+`--crush` / `--note` / `-e` from outside and `--crush` inside a pane, a `settings.json` override. Fixed:
+- Notifications from the installed app never appeared: Windows drops them unless a Start Menu shortcut carries the
+  app's id, so `install.ps1` now sets it on its shortcut. (Run from `target\release` they show as PowerShell's.)
+- `magica-terminal --crush` / `--note` typed in a pane did nothing: the release exe has no console, so it now
+  attaches to the pane's to send the escape sequence.
+- Windows paths (`C:\…`, `~\…`) weren't Ctrl+clickable.
+- After clicking – □ or a tab, keys went to that button (Enter toggled maximise) instead of the terminal.
+- Maximised windows kept their rounded corners.
+- The terminal's scrollbar is gone (it showed on focus, over her).
+- With `figure_opacity` above `active_figure_opacity`, the active pane's figure was the fainter one.
+
+Not checked: session restore and a second window starting fresh (they depend on no other Magica Terminal being
+open, and one was), `kyubey` (needs an admin prompt). Known: a path wrapped onto the next line isn't clickable.

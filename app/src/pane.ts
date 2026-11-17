@@ -18,13 +18,14 @@ import { install, type MagicaCmd } from "./protocol";
 import { openSpace } from "./space";
 import { historyText, restoredText } from "./session";
 import type { Settings } from "./settings";
-import { mix, palette, THEMES, xtermTheme, type ThemeName } from "./theme";
+import { mix, palette, seeThrough, THEMES, xtermTheme, type ThemeName } from "./theme";
 import { actionFor } from "./keys";
 
 export interface WindowHost {
   settings: Settings;
   os: "linux" | "mac" | "windows";
   home: string;
+  windowsBuild: number | null;
   theme(): ThemeName;
   fontFamily(): string;
   fontSize(): number;
@@ -59,6 +60,7 @@ export class Pane implements PaneHost {
   focused = false;
   overlay: Overlay | null = null;
   private ptyId = 0;
+  private pending: string[] = [];   // typed or answered before the shell started
   private fit = new FitAddon();
   private search = new SearchAddon();
   private figure: Figure;
@@ -78,12 +80,15 @@ export class Pane implements PaneHost {
     back.className = "pane-bg";
     const host = document.createElement("div");
     host.className = "term";
-    host.style.padding = `${this.settings.padding}px`;
+    // inset, not padding: the fit addon sizes to its parent's height, which with border-box includes the padding,
+    // so the last row ran into the bottom padding (or under the edge)
+    host.style.inset = `${this.settings.padding}px`;
     this.figure = new Figure({
       settings: this.settings,
       name: () => this.character,
       colour: () => this.colour(),
       focused: () => this.focused,
+      active: () => win.isActive(this),
       hidden: () => this.overlay?.kind === "crush" || this.overlay?.kind === "note",
       term: () => this.term,
       inkColours: () => ({ fg: THEMES[win.theme()].fg, bg: THEMES[win.theme()].bg, palette: palette(win.theme(), this.settings) }),
@@ -92,13 +97,16 @@ export class Pane implements PaneHost {
     this.el.append(back, this.figure.canvas, this.figure.base, host);
 
     this.term = new Terminal({
-      allowTransparency: true,
+      allowTransparency: seeThrough(win.theme()),
       allowProposedApi: true,
       fontFamily: win.fontFamily(),
       fontSize: win.fontSize(),
       scrollback: 10000,
       cursorBlink: false,
       macOptionIsMeta: true,
+      // ConPTY redraws the screen itself when the size changes: told so, xterm doesn't also pull scrollback into
+      // view, which doubled lines after a resize (until a keypress made the shell redraw)
+      windowsPty: win.os === "windows" ? { backend: "conpty", buildNumber: win.windowsBuild ?? 22000 } : undefined,
       theme: xtermTheme(win.theme(), this.colour(), false, this.settings),
     });
     this.term.loadAddon(this.fit);
@@ -149,15 +157,15 @@ export class Pane implements PaneHost {
           win.titleChanged(this);
         }
       },
-      reply: (s) => this.ptyId && writePane(this.ptyId, s),
+      reply: (s) => this.send(s),
       theme: () => ({ fg: THEMES[win.theme()].fg, bg: THEMES[win.theme()].bg, dark: win.theme() === "dark" }),
     });
 
     this.term.onData((d) => {
       this.figure.touch();
-      if (this.ptyId) writePane(this.ptyId, d);
+      this.send(d);
     });
-    this.term.onBinary((d) => this.ptyId && writePane(this.ptyId, d));
+    this.term.onBinary((d) => this.send(d));
     this.term.onResize(({ cols, rows }) => {
       if (this.ptyId) resizePane(this.ptyId, cols, rows);
       this.figure.queueCover();
@@ -187,11 +195,19 @@ export class Pane implements PaneHost {
     if (await pathExists(p)) openPath(p).catch(() => {});
   }
 
+  /** To the shell; held until it has started. Windows' ConPTY asks where the cursor is (ESC[6n) as the shell starts
+   * and waits for the answer, which can come before spawnPane returns: dropping it left the pane hung, no prompt and
+   * no typing (most often with several panes starting at once, as `magica` does). */
+  private send(d: string) {
+    if (this.ptyId) writePane(this.ptyId, d);
+    else if (!this.exited) this.pending.push(d);
+  }
+
   private async start(opts: PaneOpts) {
     requestAnimationFrame(() => this.layout());
     await new Promise((r) => requestAnimationFrame(r));
     try {
-      this.ptyId = await spawnPane(
+      const id = await spawnPane(
         { cwd: opts.cwd, character: this.character, command: opts.command, resume: opts.resume, cols: this.term.cols, rows: this.term.rows },
         (b) => this.term.write(b),
         () => {
@@ -200,7 +216,12 @@ export class Pane implements PaneHost {
           this.win.paneExited(this);
         },
       );
-      resizePane(this.ptyId, this.term.cols, this.term.rows);
+      if (this.exited) return;
+      this.ptyId = id;
+      const held = this.pending.join("");
+      this.pending = [];
+      if (held) writePane(id, held);
+      resizePane(id, this.term.cols, this.term.rows);
     } catch (e) {
       this.term.write(`\r\nmagica: couldn't start a shell: ${e}\r\n`);
     }
@@ -221,7 +242,7 @@ export class Pane implements PaneHost {
     return this.win.os === "windows" ? "pwsh" : "posix";
   }
   sendToShell(text: string) {
-    if (this.ptyId) writePane(this.ptyId, text);
+    this.send(text);
   }
   closeOverlay() {
     if (!this.overlay) return;
@@ -286,10 +307,11 @@ export class Pane implements PaneHost {
   restyle() {
     const s = this.settings, theme = this.win.theme(), t = THEMES[theme];
     const active = this.win.isActive(this);
-    this.term.options.theme = xtermTheme(theme, this.colour(), active, s);
     const multi = this.win.multi(this);
     // with several panes: the focused one gets a light tint of her colour; the others an optional veil
     const bg = multi && active ? mix(mix(t.bg, "#ffffff", s.focus_brighten[theme]), this.colour(), s.focus_tint) : t.bg;
+    if (this.term.options.allowTransparency !== seeThrough(theme)) this.term.options.allowTransparency = seeThrough(theme);
+    this.term.options.theme = xtermTheme(theme, this.colour(), active, s, bg);
     this.el.style.setProperty("--pane-bg", bg);
     this.el.style.setProperty("--her", this.colour());
     this.el.style.setProperty("--veil", multi && !active ? s.unfocused_overlay : "transparent");

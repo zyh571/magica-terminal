@@ -15,6 +15,14 @@ describe("links", () => {
     expect(texts("a/b")).toEqual([]);
     expect(texts("http://x.y/z")).toEqual([["http://x.y/z", "url"]]);   // not also a path
   });
+  test("windows paths", () => {
+    expect(texts("path: C:\\Windows\\win.ini")).toEqual([["C:\\Windows\\win.ini", "path"]]);
+    expect(texts("see C:/Users/u/a.txt.")).toEqual([["C:/Users/u/a.txt", "path"]]);
+    expect(texts("~\\Documents\\notes.md")).toEqual([["~\\Documents\\notes.md", "path"]]);
+    expect(texts("D:\\")).toEqual([["D:\\", "path"]]);
+    expect(texts("\\section{x} and a\\b")).toEqual([]);   // a backslash alone doesn't make a path
+    expect(texts("file:///C:/x")).toEqual([["file:///C:/x", "url"]]);
+  });
   test("positions", () => {
     const [l] = findLinks("  /tmp/x y");
     expect([l.start, l.end]).toEqual([2, 8]);
@@ -22,5 +30,8 @@ describe("links", () => {
   test("resolving", () => {
     expect(resolvePath("~/x", "/home/u", "/cwd")).toBe("/home/u/x");
     expect(resolvePath("/a/b", "/home/u", "/cwd")).toBe("/a/b");
+    expect(resolvePath("~\\x", "C:\\Users\\u", "C:\\cwd")).toBe("C:\\Users\\u\\x");
+    expect(resolvePath("C:\\a\\b", "C:\\Users\\u", "C:\\cwd")).toBe("C:\\a\\b");
+    expect(resolvePath("c:/a", "C:\\Users\\u", "C:\\cwd")).toBe("c:/a");
   });
 });

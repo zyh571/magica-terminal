@@ -27,6 +27,7 @@ async function main() {
     settings: { ...DEFAULTS, ...settings },
     os: start.os,
     home: start.home,
+    windowsBuild: start.windows_build,
     theme,
     themeSetting: chosen === "light" || chosen === "dark" ? chosen : "system",
   });
