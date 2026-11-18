@@ -37,7 +37,7 @@ struct Resume {
 
 fn allowed(name: &str) -> Result<PathBuf, String> {
     match name {
-        "note.txt" | "crush.json" | "theme" => Ok(paths::file(name)),
+        "note.txt" | "crush.json" | "theme" | "mode" => Ok(paths::file(name)),
         _ => Err(format!("not a Magica file: {name}")),
     }
 }

@@ -10,21 +10,31 @@ if [ "$MAGICA_APP" = tauri ] && [ -n "$MAGICA_CHAR" ] && [ "${BASH_VERSINFO[0]:-
   _mc_sayaka_name=106 _mc_sayaka_text=107 _mc_sayaka_path=108 _mc_mami_name=109 _mc_mami_text=110 _mc_mami_path=111
   _mc_kyoko_name=112 _mc_kyoko_text=113 _mc_kyoko_path=114 _mc_kyubey_name=115 _mc_kyubey_text=116 _mc_kyubey_path=117
   _mc_red=118
+  # in dark she goes by her witch's name ("$MAGICA_CONFIG/mode", which the app keeps as light or dark)
+  _mc_madoka_witch=kriemhild _mc_homura_witch=homulilly _mc_sayaka_witch=oktavia _mc_mami_witch=candeloro
+  _mc_kyoko_witch=ophelia
   _magica_osc() { printf '\e]%s\e\\' "$1"; }
   _magica_prompt() {
     local status=$?   # handed on unchanged, so later PROMPT_COMMAND parts see the command's exit code
-    local n t p
+    local n t p who=$MAGICA_CHAR mode=
     eval "n=\${_mc_${MAGICA_CHAR}_name:-100} t=\${_mc_${MAGICA_CHAR}_text:-101} p=\${_mc_${MAGICA_CHAR}_path:-102}"
+    [ -r "$MAGICA_CONFIG/mode" ] && read -r mode < "$MAGICA_CONFIG/mode"
+    [ "$mode" = dark ] && eval "who=\${_mc_${MAGICA_CHAR}_witch:-\$MAGICA_CHAR}"
     if [ "$MAGICA_CHAR" = kyubey ]; then   # Kyubey's root prompt: white/grey/black, with a grey accent
       PS1='\[\e]133;A\e\\\e]0;kyubey@magica: \w\a\]\[\e[1;38;5;'"$n"'m\]kyubey\[\e[1;38;5;118m\]@magica\[\e[0m\]:\[\e[1;38;5;'"$p"'m\]\w\[\e[1;38;5;118m\]#\[\e[0m\] \[\e]133;B\e\\\e[38;5;'"$t"'m\]'
     else
-      PS1='\[\e]133;A\e\\\e]0;'"$MAGICA_CHAR"'@magica: \w\a\]${debian_chroot:+($debian_chroot)}\[\e[1;38;5;'"$n"'m\]'"$MAGICA_CHAR"'@magica\[\e[0m\]:\[\e[1;38;5;'"$p"'m\]\w\[\e[0m\]\$ \[\e]133;B\e\\\e[38;5;'"$t"'m\]'
+      PS1='\[\e]133;A\e\\\e]0;'"$who"'@magica: \w\a\]${debian_chroot:+($debian_chroot)}\[\e[1;38;5;'"$n"'m\]'"$who"'@magica\[\e[0m\]:\[\e[1;38;5;'"$p"'m\]\w\[\e[0m\]\$ \[\e]133;B\e\\\e[38;5;'"$t"'m\]'
     fi
     return $status
   }
   # how the last command ended (OSC 133;D) and where the shell is (OSC 7, percent-encoded)
   _magica_done() {
     local s=$? LC_ALL=C path=$PWD out= c i
+    if [ -n "$_magica_repainting" ]; then   # only redrawing the prompt: up onto the old one and clear it
+      _magica_repainting=
+      printf '\e[A\r\e[J'
+      return $s
+    fi
     _magica_osc "133;D;$s"
     for ((i = 0; i < ${#path}; i++)); do
       c=${path:i:1}
@@ -158,6 +168,23 @@ if [ "$MAGICA_APP" = tauri ] && [ -n "$MAGICA_CHAR" ] && [ "${BASH_VERSINFO[0]:-
   PROMPT_COMMAND="_magica_done; _magica_env; _magica_prompt; _magica_resume${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
   PS0=$'\e[0m\e]133;C\e\\'   # the typed command is in her text colour; its output goes back to the normal colour
   _magica_prompt
+  # the terminal sends Ctrl+Alt+Shift+F12 to a shell waiting at its prompt when light/dark changes: draw the prompt
+  # again (her name and colours go with the theme), keeping what's typed
+  # (readline only reads the prompt as a line starts, so: put the line aside, enter an empty one, which builds the
+  # prompt anew — _magica_done wipes the old prompt's line instead of reporting a command — and bring the line back)
+  _magica_repainting= _magica_stash= _magica_stash_at=0
+  _magica_repaint_save() {
+    _magica_stash=$READLINE_LINE _magica_stash_at=$READLINE_POINT _magica_repainting=1
+    READLINE_LINE= READLINE_POINT=0
+  }
+  _magica_repaint_restore() {
+    READLINE_LINE=$_magica_stash READLINE_POINT=$_magica_stash_at
+    _magica_stash= _magica_stash_at=0
+  }
+  bind -x '"\e[9973s": _magica_repaint_save' 2>/dev/null
+  bind '"\e[9973e": accept-line' 2>/dev/null
+  bind -x '"\e[9973r": _magica_repaint_restore' 2>/dev/null
+  bind '"\e[24;8~": "\e[9973s\e[9973e\e[9973r"' 2>/dev/null
   if [ "$MAGICA_CHAR" != kyubey ]; then
     for _magica_c in madoka homura sayaka mami kyoko; do
       eval "$_magica_c() { [ \"\$MAGICA_CHAR\" = $_magica_c ] && return; MAGICA_CHAR=$_magica_c; _magica_prompt; _magica_osc '9973;set;$_magica_c'; clear; }"

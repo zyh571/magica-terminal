@@ -7,14 +7,19 @@ if [[ $MAGICA_APP == tauri && -n $MAGICA_CHAR ]]; then
   typeset -g _mc_homura_path=105 _mc_sayaka_name=106 _mc_sayaka_text=107 _mc_sayaka_path=108 _mc_mami_name=109
   typeset -g _mc_mami_text=110 _mc_mami_path=111 _mc_kyoko_name=112 _mc_kyoko_text=113 _mc_kyoko_path=114
   typeset -g _mc_kyubey_name=115 _mc_kyubey_text=116 _mc_kyubey_path=117 _mc_red=118
+  # in dark she goes by her witch's name ("$MAGICA_CONFIG/mode", which the app keeps as light or dark)
+  typeset -g _mc_madoka_witch=kriemhild _mc_homura_witch=homulilly _mc_sayaka_witch=oktavia _mc_mami_witch=candeloro
+  typeset -g _mc_kyoko_witch=ophelia
   _magica_osc() { printf '\e]%s\e\\' "$1"; }
   _magica_slot() { local v="_mc_${MAGICA_CHAR}_$1"; print -rn -- "${(P)v:-$2}"; }
   _magica_prompt() {
-    local n=$(_magica_slot name 100) t=$(_magica_slot text 101) p=$(_magica_slot path 102)
+    local n=$(_magica_slot name 100) t=$(_magica_slot text 101) p=$(_magica_slot path 102) who=$MAGICA_CHAR mode=
+    [[ -r $MAGICA_CONFIG/mode ]] && mode=$(<$MAGICA_CONFIG/mode)
+    [[ ${mode%%[[:space:]]*} == dark ]] && who=$(_magica_slot witch $MAGICA_CHAR)
     if [[ $MAGICA_CHAR == kyubey ]]; then
       PROMPT=$'%{\e]133;A\e\\\e]0;kyubey@magica: %~\a%}%{\e[1;38;5;'"$n"$'m%}kyubey%{\e[1;38;5;118m%}@magica%{\e[0m%}:%{\e[1;38;5;'"$p"$'m%}%~%{\e[1;38;5;118m%}#%{\e[0m%} %{\e]133;B\e\\\e[38;5;'"$t"$'m%}'
     else
-      PROMPT=$'%{\e]133;A\e\\\e]0;'"$MAGICA_CHAR"$'@magica: %~\a%}%{\e[1;38;5;'"$n"$'m%}'"$MAGICA_CHAR"$'@magica%{\e[0m%}:%{\e[1;38;5;'"$p"$'m%}%~%{\e[0m%}$ %{\e]133;B\e\\\e[38;5;'"$t"$'m%}'
+      PROMPT=$'%{\e]133;A\e\\\e]0;'"$who"$'@magica: %~\a%}%{\e[1;38;5;'"$n"$'m%}'"$who"$'@magica%{\e[0m%}:%{\e[1;38;5;'"$p"$'m%}%~%{\e[0m%}$ %{\e]133;B\e\\\e[38;5;'"$t"$'m%}'
     fi
   }
   _magica_osc7() {
@@ -170,6 +175,12 @@ if [[ $MAGICA_APP == tauri && -n $MAGICA_CHAR ]]; then
   precmd_functions=(_magica_precmd ${precmd_functions:#_magica_precmd})
   add-zsh-hook preexec _magica_preexec
   _magica_prompt
+  # the terminal sends Ctrl+Alt+Shift+F12 to a shell waiting at its prompt when light/dark changes: draw the prompt
+  # again (her name and colours go with the theme), keeping what's typed
+  _magica_repaint() { _magica_prompt; zle reset-prompt; }
+  zle -N _magica_repaint
+  for _magica_km in emacs viins vicmd; do bindkey -M $_magica_km $'\e[24;8~' _magica_repaint; done
+  unset _magica_km
   if [[ $MAGICA_CHAR != kyubey ]]; then
     for _magica_c in madoka homura sayaka mami kyoko; do
       eval "$_magica_c() { [[ \$MAGICA_CHAR == $_magica_c ]] && return; MAGICA_CHAR=$_magica_c; _magica_prompt; _magica_osc '9973;set;$_magica_c'; clear; }"

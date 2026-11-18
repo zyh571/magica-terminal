@@ -4,6 +4,7 @@
 if ($env:MAGICA_APP -eq 'tauri' -and $env:MAGICA_CHAR) {
   $global:_magica_e = [char]27
   $global:_magica_slots = @{ madoka = 100; homura = 103; sayaka = 106; mami = 109; kyoko = 112; kyubey = 115 }
+  $global:_magica_witches = @{ madoka = 'kriemhild'; homura = 'homulilly'; sayaka = 'oktavia'; mami = 'candeloro'; kyoko = 'ophelia' }
 
   function global:_magica_osc([string]$s) { [Console]::Write("$($global:_magica_e)]$s$($global:_magica_e)\") }
   function global:_magica_slot([int]$offset) {
@@ -168,15 +169,22 @@ if ($env:MAGICA_APP -eq 'tauri' -and $env:MAGICA_CHAR) {
     $code = $global:LASTEXITCODE
     $status = if ($ok) { 0 } elseif ($code) { $code } else { 1 }
     $e = $global:_magica_e
-    _magica_osc "133;D;$status"
-    _magica_osc7
-    _magica_env
-    _magica_resume
+    if ($global:_magica_repainting) {
+      $global:_magica_repainting = $false   # only redrawing it (the theme changed): nothing ran, nothing to report
+    } else {
+      _magica_osc "133;D;$status"
+      _magica_osc7
+      _magica_env
+      _magica_resume
+    }
     $global:LASTEXITCODE = $code
     $path = (Get-Location).ProviderPath
     $home_ = [Environment]::GetFolderPath('UserProfile')
     if ($home_ -and $path.StartsWith($home_)) { $path = '~' + $path.Substring($home_.Length) }
     $name = $env:MAGICA_CHAR
+    # in dark she goes by her witch's name ("$env:MAGICA_CONFIG\mode", which the app keeps as light or dark)
+    $mode = $(try { [IO.File]::ReadAllText((Join-Path $env:MAGICA_CONFIG 'mode')).Trim() } catch { '' })
+    if ($mode -eq 'dark' -and $global:_magica_witches[$name]) { $name = $global:_magica_witches[$name] }
     $n = _magica_slot 0; $t = _magica_slot 1; $p = _magica_slot 2
     $title = "$e]0;$name@magica: $path$([char]7)"
     if ($name -eq 'kyubey') {
@@ -185,6 +193,15 @@ if ($env:MAGICA_APP -eq 'tauri' -and $env:MAGICA_CHAR) {
       $text = "$e[1;38;5;${n}m$name@magica$e[0m:$e[1;38;5;${p}m$path$e[0m> "
     }
     "$e]133;A$e\$title$text$e]133;B$e\"
+  }
+
+  # the terminal sends Ctrl+Alt+Shift+F12 to a shell waiting at its prompt when light/dark changes: draw the prompt
+  # again (her name and colours go with the theme), keeping what's typed
+  if (Get-Command Set-PSReadLineKeyHandler -ErrorAction SilentlyContinue) {
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+Alt+Shift+F12' -ScriptBlock {
+      $global:_magica_repainting = $true
+      [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+    }
   }
 
   # a command starting (OSC 133;C), when PSReadLine hands over the line

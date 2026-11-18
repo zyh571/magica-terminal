@@ -105,6 +105,13 @@ export function legibleOn(c: string, bg: string, min: number): string {
   return out;
 }
 
+/** `c` lightened (toward white) until it has at least `min` contrast on the dark `bg`. */
+export function legibleOnDark(c: string, bg: string, min: number): string {
+  let out = c;
+  for (let t = 0.02; contrast(out, bg) < min && t <= 1; t += 0.02) out = mix(c, "#ffffff", t);
+  return out;
+}
+
 /** Our 16 colours, then the standard xterm 6×6×6 cube and the grey ramp. */
 export function xterm256(base16: string[]): string[] {
   const steps = [0, 95, 135, 175, 215, 255];
@@ -126,8 +133,8 @@ export function palette(theme: ThemeName, s: Settings): string[] {
       return;
     }
     const col = theme === "dark" ? c.dark : c.light;
-    // on light, desaturating greys her colour toward the background: keep it readable
-    const fix = (x: string) => (theme === "light" ? legibleOn(x, THEMES.light.bg, 5.5) : x);
+    // desaturating greys her colour toward the background (on light; on dark, her witch's murky one too): keep it readable
+    const fix = (x: string) => (theme === "light" ? legibleOn(x, THEMES.light.bg, 5.5) : legibleOnDark(x, THEMES.dark.bg, 5.5));
     pal[at] = fix(col);
     pal[at + 1] = fix(desaturate(col, s.text_saturation));
     pal[at + 2] = fix(desaturate(col, s.path_saturation));

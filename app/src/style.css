@@ -14,7 +14,7 @@ body.maximized #app { border-radius: 0; }
   overflow: hidden;
 }
 
-/* our own title bar: a dot and name@magica in her colour, and her folder */
+/* our own title bar: her gem and name@magica in her colour, and her folder */
 .titlebar {
   flex: 0 0 36px;
   display: flex;
@@ -26,7 +26,9 @@ body.maximized #app { border-radius: 0; }
 }
 body[data-os="mac"] .titlebar { padding-left: 78px; }   /* room for the traffic lights */
 body[data-os="mac"] .titlebar .buttons { display: none; }
-.titlebar .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent); flex: none; }
+/* her soul gem, which shines; in dark, her grief seed, which doesn’t */
+.titlebar .gem { width: 26px; height: 26px; flex: none; display: flex; }   /* (a seed draws its own glow) */
+:root[data-theme="light"] .titlebar .gem { filter: drop-shadow(0 0 3px var(--accent)); }
 .titlebar .who { color: var(--accent); font-weight: bold; flex: none; }
 .titlebar .where { color: var(--dim); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .titlebar .buttons { display: flex; gap: 2px; }

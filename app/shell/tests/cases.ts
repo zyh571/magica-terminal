@@ -1,6 +1,6 @@
 // What every shell script must do, run against bash / zsh / pwsh (each test file calls shellCases for its shell).
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fakeAgent, have, Kind, PWSH_FAIL, sandbox, Sandbox } from "./run";
 import { parseOsc7 } from "../../src/protocol";
@@ -63,6 +63,17 @@ export function shellCases(kind: Kind) {
       expect(out).toContain(OSC("133;A"));
       expect(out).toContain(OSC("133;B"));
       expect(out).toContain("madoka@magica");
+    });
+    test("in dark she goes by her witch's name", () => {
+      mkdirSync(sb.config, { recursive: true });
+      writeFileSync(join(sb.config, "mode"), "dark\n");
+      try {
+        const out = run(prompt(kind));
+        expect(out).toContain("kriemhild@magica");
+        expect(out).not.toContain("madoka@magica");
+      } finally {
+        writeFileSync(join(sb.config, "mode"), "light\n");
+      }
     });
     test("folder in OSC 7 is percent-encoded", () => {
       const d = join(sb.root, "a b", "Zoë");

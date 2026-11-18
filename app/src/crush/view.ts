@@ -4,7 +4,7 @@ import { readText, writeText } from "../ipc";
 import type { Overlay, PaneHost } from "../overlay";
 import { mix, THEMES } from "../theme";
 import { CrushBoard, Pos, Step, Tile } from "./board";
-import { CELL, FONT_3X5, GEM_COLOURS, gemPixels, kyubeyPixels, outline, spriteCanvas } from "./sprites";
+import { CELL, FONT_3X5, GEM_COLOURS, gemPixels, griefSeedPixels, kyubeyPixels, outline, spriteCanvas } from "./sprites";
 
 const MARGIN = 4, TOP = 14, BOTTOM = 12;
 const KINDS = GEM_COLOURS.length;
@@ -94,8 +94,12 @@ export function openCrush(host: PaneHost): Overlay {
   }
 
   function sprite(kind: number | null, special: string | null): HTMLCanvasElement {
-    const key = `${kind}:${special}`;
-    if (!cache.has(key)) cache.set(key, spriteCanvas(kind === null ? outline(kyubeyPixels(), [40, 36, 48]) : gemPixels(kind, special)));
+    // light: their soul gems; dark: the grief seeds they become
+    const seeds = host.theme() === "dark", key = `${kind}:${special}:${seeds}`;
+    if (!cache.has(key)) {
+      cache.set(key, spriteCanvas(kind === null ? outline(kyubeyPixels(), [40, 36, 48])
+        : seeds ? griefSeedPixels(kind, special) : gemPixels(kind, special)));
+    }
     return cache.get(key)!;
   }
 

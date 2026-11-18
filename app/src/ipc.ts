@@ -35,7 +35,7 @@ export const paneResume = (id: number) => invoke<{ resume: string; cwd: string |
 export const getSettings = () => invoke<Settings>("get_settings");
 export const startup = () => invoke<Startup>("get_startup");
 export const readText = (name: "note.txt" | "crush.json" | "theme") => invoke<string>("read_text", { name });
-export const writeText = (name: "note.txt" | "crush.json" | "theme", text: string) => invoke<boolean>("write_text", { name, text });
+export const writeText = (name: "note.txt" | "crush.json" | "theme" | "mode", text: string) => invoke<boolean>("write_text", { name, text });
 export const loadSession = () => invoke<unknown>("load_session");
 export const saveSession = (json: string) => invoke<boolean>("save_session", { json });
 export const clearSession = () => invoke("clear_session");

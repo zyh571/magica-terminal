@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { contrast, desaturate, mix, palette, seeThrough, THEMES, xterm256, xtermTheme } from "./theme";
+import { contrast, desaturate, legibleOnDark, mix, palette, seeThrough, THEMES, xterm256, xtermTheme } from "./theme";
 import { DEFAULTS } from "./settings";
-import { slotOf } from "./characters";
+import { CHARACTERS, slotOf } from "./characters";
 
 describe("colours", () => {
   test("desaturate matches the Python app", () => {
@@ -30,15 +30,24 @@ describe("palette slots", () => {
     expect(slotOf("madoka")).toBe(100);
     expect(slotOf("kyubey")).toBe(115);
   });
-  test("dark", () => {
+  test("dark: her witch's colours", () => {
     const p = palette("dark", DEFAULTS);
-    expect(p[100]).toBe("#ff9cc6");
-    expect(p[101]).toBe("#e9b2c9");
-    expect(p[102]).toBe("#e1baca");
-    expect(p[103]).toBe("#b9a0ff");
+    CHARACTERS.forEach((c, i) => {
+      expect(p[100 + 3 * i]).toBe(c.dark);
+      const readable = (x: string) => legibleOnDark(x, THEMES.dark.bg, 5.5);
+      expect(p[101 + 3 * i]).toBe(readable(desaturate(c.dark, DEFAULTS.text_saturation)));
+      expect(p[102 + 3 * i]).toBe(readable(desaturate(c.dark, DEFAULTS.path_saturation)));
+    });
+    expect(p[100]).toBe("#d88aab");   // Kriemhild: Madoka's pink, murky
     expect(p[115]).toBe("#f4f4f4");
     expect(p[116]).toBe("#c9c9cc");
     expect(p[118]).toBe("#8a8a8f");
+  });
+  test("dark: the witches' name, text and path colours are readable however desaturated", () => {
+    for (const s of [DEFAULTS, { ...DEFAULTS, text_saturation: 0, path_saturation: 0.1 }]) {
+      const p = palette("dark", s);
+      for (let i = 100; i < 115; i++) expect(contrast(p[i], THEMES.dark.bg)).toBeGreaterThanOrEqual(5.5);
+    }
   });
   test("light", () => {
     const p = palette("light", DEFAULTS);

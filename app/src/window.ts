@@ -1,9 +1,11 @@
-// The window: our own title bar (a dot and name@magica in the focused pane's colour, and her folder), tabs, each
+// The window: our own title bar (her soul gem or grief seed and name@magica in the focused pane's colour, and her folder), tabs, each
 // tab a tree of split panes, the shortcuts, the theme, the font size and the session.
+import { Image } from "@tauri-apps/api/image";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { readText as clipboardRead, writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import { nextCharacter, type CharName } from "./characters";
+import { nextCharacter, shownName, type CharName } from "./characters";
+import { gemElement, gemIcon } from "./gem";
 import { clearSession, paneResume, saveSession, writeText } from "./ipc";
 import { actionFor, type Action } from "./keys";
 import { build, LAYOUTS, neighbour, Node, paneIds, remove, split } from "./layout";
@@ -48,6 +50,8 @@ export class MagicaWindow implements WindowHost {
   private onTop = false;
   private closing = false;
   private readonly appWindow = getCurrentWindow();
+  private readonly titleGem: HTMLElement;
+  private gemShown = "";
   private readonly titleWho: HTMLElement;
   private readonly titleWhere: HTMLElement;
   private readonly tabBar: HTMLElement;
@@ -64,11 +68,12 @@ export class MagicaWindow implements WindowHost {
     document.body.dataset.os = o.os;
     root.innerHTML = `
       <header class="titlebar" data-tauri-drag-region>
-        <span class="dot"></span><span class="who" data-tauri-drag-region></span><span class="where" data-tauri-drag-region></span>
+        <span class="gem"></span><span class="who" data-tauri-drag-region></span><span class="where" data-tauri-drag-region></span>
         <span class="buttons"><button class="min" title="Minimise" tabindex="-1">–</button><button class="max" title="Maximise" tabindex="-1">□</button><button class="close" title="Close" tabindex="-1">✕</button></span>
       </header>
       <nav class="tabs" hidden></nav>
       <main class="stage"></main>`;
+    this.titleGem = root.querySelector(".gem")!;
     this.titleWho = root.querySelector(".who")!;
     this.titleWhere = root.querySelector(".where")!;
     this.tabBar = root.querySelector(".tabs")!;
@@ -94,6 +99,7 @@ export class MagicaWindow implements WindowHost {
       await this.appWindow.destroy();
     });
     this.applyThemeCss();
+    this.writeMode();
   }
 
   /** Maximised: square corners (rounded ones against the screen's edges looked chipped). */
@@ -325,12 +331,26 @@ export class MagicaWindow implements WindowHost {
   private updateTitle() {
     const p = this.active;
     if (!p) return;
-    this.titleWho.textContent = `${p.character}@magica`;
+    this.titleWho.textContent = `${shownName(p.character, this.themeName)}@magica`;
     // (marked left-to-right at both ends: the box is right-to-left so a long path loses its start, which would
     // otherwise move a leading "~\" to the end)
     this.titleWhere.textContent = `‎${p.where}‎`;
     this.root.style.setProperty("--accent", p.colour());
+    this.showGem(p.character, p.colour());
     this.updateTabLabels();
+  }
+
+  /** Her soul gem (light) or grief seed (dark) in the title bar, and as the taskbar icon. */
+  private showGem(name: CharName, colour: string) {
+    const key = `${name}:${this.themeName}`;
+    if (key === this.gemShown) return;
+    this.gemShown = key;
+    this.titleGem.replaceChildren(gemElement(name, this.themeName, colour, 26));
+    const size = 64;
+    gemIcon(name, this.themeName, colour, size)
+      .then((rgba) => (key === this.gemShown ? Image.new(rgba, size, size) : null))   // (unless she changed meanwhile)
+      .then((img) => img && this.appWindow.setIcon(img))
+      .catch(() => {});
   }
 
   private updateTabLabels() {
@@ -389,12 +409,19 @@ export class MagicaWindow implements WindowHost {
     document.documentElement.dataset.theme = this.themeName;
   }
 
+  /** Light or dark, for the shells' prompts, which read it each time (in dark she goes by her witch's name). */
+  private writeMode(): Promise<unknown> {
+    return writeText("mode", this.themeName + "\n").catch(() => {});
+  }
+
   setTheme(name: ThemeName) {
     this.themeName = name;
     writeText("theme", name + "\n").catch(() => {});
     this.applyThemeCss();
     this.panes.forEach((p) => p.themeChanged());
     this.updateTitle();
+    // the prompts waiting now are redrawn too, once the shells can read the new mode
+    this.writeMode().then(() => this.panes.forEach((p) => p.repaintPrompt()));
   }
 
   private setFontScale(k: number) {

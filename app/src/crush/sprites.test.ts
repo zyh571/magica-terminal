@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, test } from "vitest";
-import { gemPixels, kyubeyPixels, outline, type Px } from "./sprites";
+import { GEM_COLOURS, gemPixels, griefSeedPixels, kyubeyPixels, outline, rgb, type Px } from "./sprites";
 
 const digest = (px: Px) => createHash("sha1").update(Buffer.from(px.flat().flat())).digest("hex");
 
@@ -27,4 +27,18 @@ test("gems match the old app pixel for pixel", () => {
 
 test("kyubey", () => {
   expect(digest(outline(kyubeyPixels(), [40, 36, 48]))).toBe("6330e53305a7f45ea9572d0af30dd730bd35a104");
+});
+
+test("grief seeds: one per gem, each different, her colour kept as the ember on top", () => {
+  const all = new Set<string>();
+  for (let k = 0; k < 5; k++) {
+    for (const sp of [null, "h", "v", "wrapped"]) {
+      const px = griefSeedPixels(k, sp);
+      expect(px.length).toBe(20);
+      expect(px[0].length).toBe(20);
+      all.add(digest(px));
+    }
+    expect(griefSeedPixels(k, null)[2].slice(9, 11).map((p) => p.slice(0, 3))).toEqual([rgb(GEM_COLOURS[k]), rgb(GEM_COLOURS[k])]);
+  }
+  expect(all.size).toBe(20);
 });

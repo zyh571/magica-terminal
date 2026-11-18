@@ -66,6 +66,8 @@ export class Pane implements PaneHost {
   private figure: Figure;
   private searchBar: HTMLInputElement | null = null;
   private cmdStart: number | null = null;
+  /** Her shell is waiting at its prompt (between OSC 133;B and 133;C). */
+  private atPrompt = false;
   private protocol: { themeChanged(): void };
   private exited = false;
   private resizeObserver: ResizeObserver;
@@ -141,6 +143,8 @@ export class Pane implements PaneHost {
         this.cwd = p;
       },
       onMark: (m) => {
+        if (m.kind === "input") this.atPrompt = true;
+        else if (m.kind === "exec" || m.kind === "prompt") this.atPrompt = false;
         if (m.kind === "exec") this.cmdStart = performance.now();
         else if (m.kind === "done") {
           if (this.cmdStart === null) return;   // an empty line: nothing ran
@@ -324,6 +328,12 @@ export class Pane implements PaneHost {
   themeChanged() {
     this.restyle();
     this.protocol.themeChanged();
+  }
+
+  /** Ask her shell to draw its prompt again (its name and colours follow light/dark): Ctrl+Alt+Shift+F12, which our
+   * shell integration binds. Only while it waits at its prompt, so a running program never gets the key. */
+  repaintPrompt() {
+    if (this.atPrompt) this.send("\x1b[24;8~");
   }
 
   setFont(family: string, size: number) {

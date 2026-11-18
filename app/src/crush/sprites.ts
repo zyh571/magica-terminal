@@ -111,6 +111,47 @@ export function gemPixels(kind: number, special: string | null): Px {
   return px;
 }
 
+// a grief seed's black metal: its finial on top and its spike below. k: shadow, K: metal, S: sheen, o: her ember
+const SEED_METAL: Record<string, Rgb> = { k: [16, 12, 20], K: [44, 37, 50], S: [104, 94, 112] };
+const SEED_TOP = ["....SK....", "....SK....", ".k..oo..k.", ".kk.SK.kk.", "..kKSKKk..", "...kSKk..."];
+const SEED_SPIKE = ["..kKSKKk..", "...kSKk...", "...kSKk...", "....SK....", "....kk...."];
+
+/** Her soul gem once it's spent: a black orb on a spike under a finial, lit from the top-left in grey. Her colour
+ * stays only as an ember: a rim light on the lower right, the seam down its middle, and the outline, so the five
+ * still tell apart. Striped seeds get bands of her colour, wrapped ones a brighter rim. */
+export function griefSeedPixels(kind: number, special: string | null): Px {
+  const c = rgb(GEM_COLOURS[kind]), black: Rgb = [10, 8, 14], white: Rgb = [255, 255, 255];
+  const wrapped = special === "wrapped" || special === "armed";
+  const body = shade([30, 25, 36], c, wrapped ? 0.3 : 0.08);
+  const tones = [shade(body, white, 0.32), shade(body, white, 0.12), body, shade(body, black, 0.6)];
+  let px = blank();
+  for (let y = 0; y < CELL; y++) {
+    for (let x = 0; x < CELL; x++) {
+      const u = (x + 0.5 - CELL / 2) / 5.4, v = (y + 0.5 - 10.5) / 4.8;
+      const d = u * u + v * v;
+      if (d > 1) continue;
+      const light = 0.6 * u + 0.6 * v;   // low: lit from the top-left; high, at the edge: her rim light
+      let tone: Rgb = light >= 0.45 && d >= 0.55 ? shade(c, black, 0.15 - 0.3 * (light - 0.45))
+        : tones[[-0.45, -0.1, 0.3].filter((t) => light >= t).length];
+      if ((special === "h" || special === "v") && Math.floor((special === "h" ? y : x) / 2) % 2 === 0) {
+        tone = shade(tone, c, 0.55);
+      }
+      px[y][x] = [...tone, 255];
+    }
+  }
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]]) px[8 + dy][6 + dx] = [200, 196, 206, 255];   // the glint
+  px = outline(px, special === null ? shade(c, black, 0.3) : shade(c, white, 0.35));
+  for (const [rows, top] of [[SEED_TOP, 0], [SEED_SPIKE, CELL - SEED_SPIKE.length]] as [string[], number][]) {
+    rows.forEach((row, i) => {
+      [...row].forEach((ch, j) => {
+        const col = ch === "o" ? c : SEED_METAL[ch];
+        if (col) px[top + i][Math.floor((CELL - row.length) / 2) + j] = [...col, 255];
+      });
+    });
+  }
+  return px;
+}
+
 export function kyubeyPixels(): Px {
   const colours: Record<string, Rgb> = { W: [246, 246, 248], R: [214, 33, 59], P: [242, 140, 177] };
   const px = blank();
