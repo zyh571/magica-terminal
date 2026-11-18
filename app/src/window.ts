@@ -6,7 +6,7 @@ import { readText as clipboardRead, writeText as clipboardWrite } from "@tauri-a
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { nextCharacter, shownName, type CharName } from "./characters";
 import { gemElement, gemIcon } from "./gem";
-import { clearSession, paneResume, saveSession, writeText } from "./ipc";
+import { clearSession, paneResume, saveSession, setTaskbarIcon, writeText } from "./ipc";
 import { actionFor, type Action } from "./keys";
 import { build, LAYOUTS, neighbour, Node, paneIds, remove, split } from "./layout";
 import { Pane, type PaneOpts, type WindowHost } from "./pane";
@@ -348,9 +348,12 @@ export class MagicaWindow implements WindowHost {
     this.titleGem.replaceChildren(gemElement(name, this.themeName, colour, 26));
     const size = 64;
     gemIcon(name, this.themeName, colour, size)
-      .then((rgba) => (key === this.gemShown ? Image.new(rgba, size, size) : null))   // (unless she changed meanwhile)
-      .then((img) => img && this.appWindow.setIcon(img))
-      .catch(() => {});
+      .then((rgba) => {
+        if (key !== this.gemShown) return;   // (she changed meanwhile)
+        // (setIcon is the small icon on Windows; the taskbar's big one needs its own call)
+        return Promise.all([Image.new(rgba, size, size).then((img) => this.appWindow.setIcon(img)), setTaskbarIcon(rgba, size)]);
+      })
+      .catch((e) => console.warn("gem icon:", e));
   }
 
   private updateTabLabels() {

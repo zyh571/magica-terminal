@@ -118,6 +118,39 @@ fn clear_session() {
     session::clear(&paths::file("session.json"))
 }
 
+/// The taskbar's (big) icon from size x size RGBA. Tauri's setIcon sets only the small one on Windows (title bar,
+/// Alt+Tab), so the taskbar would keep the exe's icon. Elsewhere setIcon already covers it.
+#[tauri::command]
+fn set_taskbar_icon(window: tauri::WebviewWindow, rgba: Vec<u8>, size: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::AtomicIsize;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{CreateIcon, DestroyIcon, SendMessageW, ICON_BIG, WM_SETICON};
+        static SHOWN: AtomicIsize = AtomicIsize::new(0);   // (the icon set last, freed once replaced)
+        let n = (size * size) as usize;
+        if size == 0 || rgba.len() != n * 4 {
+            return Err("not size x size RGBA".into());
+        }
+        let bgra: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let mask = vec![0u8; n];   // (all clear, so alpha decides; more than the 1 bit a pixel it needs)
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?.0;
+        unsafe {
+            let icon = CreateIcon(std::ptr::null_mut(), size as i32, size as i32, 1, 32, mask.as_ptr(), bgra.as_ptr());
+            if icon.is_null() {
+                return Err("CreateIcon failed".into());
+            }
+            SendMessageW(hwnd as _, WM_SETICON, ICON_BIG as usize, icon as isize);
+            let old = SHOWN.swap(icon as isize, Ordering::SeqCst);
+            if old != 0 {
+                DestroyIcon(old as _);
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (window, rgba, size);
+    Ok(())
+}
+
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
@@ -185,7 +218,7 @@ pub fn run(overlay: Option<Overlay>, command: Option<Vec<String>>) {
         })
         .invoke_handler(tauri::generate_handler![
             get_settings, get_startup, read_text, write_text, pty_spawn, pty_write, pty_resize, pty_kill, pane_resume,
-            load_session, save_session, clear_session, path_exists, scan_new, scan_up, scan_view, scan_drop
+            load_session, save_session, clear_session, path_exists, set_taskbar_icon, scan_new, scan_up, scan_view, scan_drop
         ])
         .run(tauri::generate_context!())
         .expect("error while running Magica Terminal");

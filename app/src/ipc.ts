@@ -39,7 +39,8 @@ export const writeText = (name: "note.txt" | "crush.json" | "theme" | "mode", te
 export const loadSession = () => invoke<unknown>("load_session");
 export const saveSession = (json: string) => invoke<boolean>("save_session", { json });
 export const clearSession = () => invoke("clear_session");
-export const pathExists = (path: string) => invoke<boolean>("path_exists", { path });
+export const setTaskbarIcon = (rgba: Uint8Array, size: number) => invoke("set_taskbar_icon", { rgba: Array.from(rgba), size });
+export const pathExists =(path: string) => invoke<boolean>("path_exists", { path });
 
 export interface ScanItem { id: number; name: string; size: number; folder: boolean; listed: boolean; error: string | null }
 export interface ScanView extends Omit<ScanItem, "name"> { path: string; parent: number | null; children: ScanItem[] }
