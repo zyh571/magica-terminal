@@ -6,7 +6,7 @@ the bottom-right corner, and the prompt, cursor and selection use her colour. It
 
 ## Install
 
-You need Rust and Node.js 20+ to build it. `install.sh` checks for them and says what's missing.
+It builds from source with Rust and Node.js 20+; the installers offer to install whatever's missing.
 
 **Linux** (also needs WebKitGTK's development files; on Ubuntu the script offers to `apt install` them):
 
@@ -15,17 +15,22 @@ You need Rust and Node.js 20+ to build it. `install.sh` checks for them and says
 ./install.sh --default  # …and makes it the default terminal (Ubuntu's xdg-terminal-exec)
 ```
 
-**macOS** (`xcode-select --install` first if you haven't): `./install.sh` puts `Magica Terminal.app` in
-`~/Applications` and links `~/.local/bin/magica-terminal`. It's unsigned, so open it the first time by right-clicking
-it and choosing Open.
+**macOS:**
+
+```sh
+./install.sh   # builds Magica Terminal.app into ~/Applications and links ~/.local/bin/magica-terminal
+```
+
+It's unsigned, so if macOS won't open it the first time, right-click it and choose Open.
 
 **Windows 11** (in PowerShell):
 
 ```powershell
-winget install Rustlang.Rustup OpenJS.NodeJS.LTS
-winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 .\install.ps1   # builds it into %LOCALAPPDATA%\Programs\magica-terminal, adds it to PATH and the Start Menu
 ```
+
+If Rust, Node.js or the C++ build tools are missing, it offers to install them with `winget` (the build tools take a
+while and ask for admin). If PowerShell won't run scripts, use `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
 
 Run the installer again after `git pull` or an edit. It also removes what the old Python version installed (its
 `~/.bashrc` line and GNOME Shell extension); your notes, Crush score, settings and last session carry over.
@@ -56,7 +61,7 @@ The integration covers bash (4+), zsh and PowerShell. Other shells (cmd.exe, WSL
 - `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character.
 - `kyubey` opens a root shell as Kyubey (`sudo`; on Windows `sudo` or `gsudo`); `exit` brings her back.
 - `pair` lays out Madoka | Homura; `magica` all five (in a new tab if the current one is split).
-- `crush` opens Magica Crush in that pane (see below). Esc or q goes back to the prompt.
+- `crush` opens Magica Crush, a match-3 game, in that pane. Esc or q goes back to the prompt.
 - `note` opens the notepad over that pane: one plain sheet in the theme and her colour, saved as you type to
   `note.txt` in the config folder. `<head>Title<head>` makes a header (listed down the left, click to jump) and
   `*word*` makes a word bold; the tags show only while the cursor is on them. Ctrl+Z / Cmd+Z undoes. While it's open
@@ -73,25 +78,8 @@ From outside, `magica-terminal --crush` or `--note` opens a window with the game
 `magica-terminal -e CMD…` runs a command in its first pane. Typed inside a Magica pane, `--crush` and `--note` open in
 that pane.
 
-## Her
-
-She stands translucent behind the text and reacts to what you run: a small jump when a command succeeds, a red squash
-when it fails, three hops (plus a notification if the window isn't focused) when a long command finishes in a pane you
-weren't looking at, and an occasional bob or breath while idle.
-
-The window draws its own title bar: a dot and `name@magica` in the focused pane's colour, and the folder her shell is
-in.
-
-Programs that ask the terminal for its background colour or light/dark mode get the current theme's answer and are
-told when it flips. In Claude Code, pick **Auto (match terminal)** in `/theme`.
-
-## Magica Crush
-
-Swap neighbouring gems (click one, then the other, or drag) to line up 3 or more. Matching 4 makes a striped gem
-(clears its row or column), an L / T / + makes a wrapped gem (a 3×3 blast, twice), and 5 or more makes a Kyubey bomb
-(swap it with a gem to clear every gem of that colour). Swapping two specials together combines them, and chains score
-more each step. It's endless, with the best score kept in `crush.json`. A lets it play itself; a game autoplay has
-touched doesn't set a best score.
+Programs that ask the terminal for light/dark mode get the current theme's answer; in Claude Code, pick
+**Auto (match terminal)** in `/theme`.
 
 ## Settings and files
 

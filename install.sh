@@ -9,6 +9,35 @@ BIN_NAME="$(sed -n 's/^pub const BIN_NAME: &str = "\(.*\)";/\1/p' "$APP/core/src
 OS="$(uname -s)"
 PATH="$HOME/.cargo/bin:$PATH"
 
+ask() { [ -t 0 ] && read -r -p "$1 [Y/n] " ans && [[ $ans != [nN]* ]]; }
+
+if [ "$OS" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then
+  if ask "Building needs Xcode's command-line tools. Install them now?"; then
+    xcode-select --install || true
+    # Apple's installer runs in its own window; carry on once it's done
+    echo "Finish the installer that just opened; this continues by itself afterwards…"
+    until xcode-select -p >/dev/null 2>&1; do sleep 5; done
+  else
+    echo "Magica Terminal needs these first:"; echo "  xcode-select --install"
+    exit 1
+  fi
+fi
+if ! command -v cargo >/dev/null && ask "Rust isn't installed. Install it now with rustup (rustup.rs)?"; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+if ! command -v npm >/dev/null && [ "$OS" = Darwin ]; then
+  if command -v brew >/dev/null; then
+    if ask "Node.js isn't installed. Install it now (brew install node)?"; then brew install node; fi
+  elif ask "Node.js isn't installed. Install it now with the official installer from nodejs.org (asks for your password)?"; then
+    base="https://nodejs.org/dist/latest-v22.x"
+    pkg="$(curl -fsSL "$base/SHASUMS256.txt" | awk '/\.pkg$/ { print $2; exit }')"
+    curl -fL -o "${TMPDIR:-/tmp}/$pkg" "$base/$pkg"
+    sudo installer -pkg "${TMPDIR:-/tmp}/$pkg" -target /
+    rm -f "${TMPDIR:-/tmp}/$pkg"
+    PATH="/usr/local/bin:$PATH"
+  fi
+fi
+
 missing=()
 command -v cargo >/dev/null || missing+=("Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh")
 command -v npm >/dev/null || missing+=("Node.js 20+: https://nodejs.org (or your package manager)")
@@ -27,9 +56,6 @@ if [ "$OS" = Linux ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
   else
     missing+=("WebKitGTK 4.1 development files, a C toolchain, OpenSSL, librsvg (see https://tauri.app/start/prerequisites/)")
   fi
-fi
-if [ "$OS" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then
-  missing+=("xcode-select --install")
 fi
 if ((${#missing[@]})); then
   echo "Magica Terminal needs these first:"

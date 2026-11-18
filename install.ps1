@@ -5,16 +5,36 @@ $dir = Join-Path $PSScriptRoot 'app'
 $binName = ([regex]::Match((Get-Content -Raw (Join-Path $dir 'core\src\paths.rs')), 'pub const BIN_NAME: &str = "(.*)";')).Groups[1].Value
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
-$missing = @()
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { $missing += 'Rust: winget install Rustlang.Rustup   (then: rustup default stable-msvc)' }
-if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { $missing += 'Node.js: winget install OpenJS.NodeJS.LTS' }
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-$msvc = (Test-Path $vswhere) -and (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-if (-not $msvc) { $missing += 'C++ build tools: winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"' }
+function Find-Missing {
+  $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+  $msvc = (Test-Path $vswhere) -and (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+  $m = @()
+  if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { $m += [pscustomobject]@{ name = 'Rust'; args = @('Rustlang.Rustup') } }
+  if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { $m += [pscustomobject]@{ name = 'Node.js'; args = @('OpenJS.NodeJS.LTS') } }
+  if (-not $msvc) { $m += [pscustomobject]@{ name = 'C++ build tools'; args = @('Microsoft.VisualStudio.2022.BuildTools', '--override', '--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended') } }
+  , $m
+}
+function Update-Path {   # pick up what winget just added, without opening a new shell
+  $env:PATH = "$env:USERPROFILE\.cargo\bin;" + [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User')
+}
+
+$missing = Find-Missing
 if ($missing.Count) {
-  Write-Host 'Magica Terminal needs these first:'
-  $missing | ForEach-Object { Write-Host "  $_" }
-  exit 1
+  Write-Host 'Magica Terminal needs these to build:'
+  $missing | ForEach-Object { Write-Host "  $($_.name):  winget install $($_.args -join ' ')" }
+  if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Write-Host 'Install them, then run .\install.ps1 again.'; exit 1 }
+  if ((Read-Host 'Install them now with winget? [Y/n]') -match '^[nN]') { exit 1 }
+  foreach ($p in $missing) {
+    Write-Host "installing $($p.name)…"
+    winget install --exact --id $p.args[0] --accept-source-agreements --accept-package-agreements @($p.args | Select-Object -Skip 1)
+  }
+  Update-Path
+  if ((Get-Command rustup -ErrorAction SilentlyContinue) -and -not (rustup toolchain list | Select-String 'msvc')) { rustup default stable-msvc }
+  $missing = Find-Missing
+  if ($missing.Count) {
+    Write-Host "Still missing: $(($missing | ForEach-Object name) -join ', '). Open a new PowerShell window and run .\install.ps1 again."
+    exit 1
+  }
 }
 
 Push-Location $dir
