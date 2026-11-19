@@ -4,7 +4,7 @@ import { readText, writeText } from "../ipc";
 import type { Overlay, PaneHost } from "../overlay";
 import { mix, THEMES } from "../theme";
 import { CrushBoard, Pos, Step, Tile } from "./board";
-import { CELL, FONT_3X5, GEM_COLOURS, gemPixels, griefSeedPixels, kyubeyPixels, outline, spriteCanvas } from "./sprites";
+import { CELL, FONT_3X5, SPRITE, GEM_COLOURS, gemPixels, griefSeedPixels, kyubeyPixels, outline, spriteCanvas } from "./sprites";
 
 const MARGIN = 4, TOP = 14, BOTTOM = 12;
 const KINDS = GEM_COLOURS.length;
@@ -425,23 +425,23 @@ export function openCrush(host: PaneHost): Overlay {
     g.translate(Math.round(x + CELL / 2), Math.round(y + CELL / 2));
     if (sp.scale !== 1) g.scale(sp.scale, sp.scale);
     g.globalAlpha = sp.alpha;
-    g.drawImage(img, -CELL / 2, -CELL / 2);
+    g.drawImage(img, -SPRITE / 2, -SPRITE / 2);
     let flash = sp.flash;
     if (sp.special === "armed") flash = Math.max(flash, Math.floor(now * 12) % 2 === 0 ? 0.6 : 0);   // about to go off again
     if (flash > 0) {   // flash: her silhouette in white
       const key = `white:${sp.kind}:${sp.special}`;
       if (!cache.has(key)) {
         const w = document.createElement("canvas");
-        w.width = w.height = CELL;
+        w.width = w.height = SPRITE;
         const wg = w.getContext("2d")!;
         wg.drawImage(img, 0, 0);
         wg.globalCompositeOperation = "source-in";
         wg.fillStyle = "#ffffff";
-        wg.fillRect(0, 0, CELL, CELL);
+        wg.fillRect(0, 0, SPRITE, SPRITE);
         cache.set(key, w);
       }
       g.globalAlpha = 0.8 * flash * sp.alpha;
-      g.drawImage(cache.get(key)!, -CELL / 2, -CELL / 2);
+      g.drawImage(cache.get(key)!, -SPRITE / 2, -SPRITE / 2);
     }
     g.restore();
     if ((sp.special === "wrapped" || sp.special === "armed") && !sp.dying) {   // wrapper: little corner pips

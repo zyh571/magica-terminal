@@ -5,7 +5,8 @@ export type Rgb = [number, number, number];
 export type Rgba = [number, number, number, number];
 export type Px = Rgba[][];
 
-export const CELL = 20;   // art pixels per board cell
+export const SPRITE = 20;   // art pixels per gem/seed sprite
+export const CELL = 24;     // art pixels per board cell: the sprite plus 2px of padding each side
 export const GEM_COLOURS = ["#ff6eb0", "#9a6bff", "#4f9dff", "#ffe94d", "#e3203a"];
 const GEM_METAL: Record<string, string> = { G: "#e9b949", g: "#9b6a17", Y: "#fff0a6" };   // gold, its shadow and shine
 const GEM_CROWN = ["....YY....", "...gGGg...", ".gGGYYGGg.", "gGYGGGGYGg", "g.G.gg.G.g"];
@@ -55,7 +56,7 @@ export function rgb(hex: string): Rgb {
 }
 
 const shade = (a: Rgb, b: Rgb, t: number): Rgb => a.map((x, i) => pyRound(x + (b[i] - x) * t)) as Rgb;
-const blank = (): Px => Array.from({ length: CELL }, () => Array.from({ length: CELL }, () => [0, 0, 0, 0] as Rgba));
+const blank = (): Px => Array.from({ length: SPRITE }, () => Array.from({ length: SPRITE }, () => [0, 0, 0, 0] as Rgba));
 
 /** A 1-pixel outline around the opaque pixels. */
 export function outline(px: Px, colour: Rgb): Px {
@@ -74,15 +75,15 @@ export function outline(px: Px, colour: Rgb): Px {
   return out;
 }
 
-/** Her soul gem as a CELL x CELL sprite: an egg lit from the top-left (a facet, a glint, an outline) in its gold
+/** Her soul gem as a SPRITE x SPRITE image: an egg lit from the top-left (a facet, a glint, an outline) in its gold
  * crown and cup. Striped gems get light bands, wrapped ones are brighter; both are outlined in a light shade. */
 export function gemPixels(kind: number, special: string | null): Px {
   const c = rgb(GEM_COLOURS[kind]), white: Rgb = [255, 255, 255], black: Rgb = [0, 0, 0];
   const tones = [shade(c, white, 0.6), shade(c, white, 0.25), c, shade(c, black, 0.3), shade(c, black, 0.5)];
   let px = blank();
-  for (let y = 0; y < CELL; y++) {
-    for (let x = 0; x < CELL; x++) {
-      const u = (x + 0.5 - CELL / 2) / 5.0, v = (y + 0.5 - 10) / 5.8;
+  for (let y = 0; y < SPRITE; y++) {
+    for (let x = 0; x < SPRITE; x++) {
+      const u = (x + 0.5 - SPRITE / 2) / 5.0, v = (y + 0.5 - 10) / 5.8;
       if ((u / (1 - 0.15 * Math.max(0, -v))) ** 2 + v * v <= 1) {   // an egg, narrower at the top
         const light = 0.55 * u + 0.7 * v - 0.25 * (1 - (u * u + v * v));
         let tone = tones[[-0.55, -0.2, 0.2, 0.5].filter((t) => light >= t).length];
@@ -101,10 +102,10 @@ export function gemPixels(kind: number, special: string | null): Px {
   }
   for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]]) px[7 + dy][7 + dx] = [255, 255, 255, 255];   // the glint
   px = outline(px, special === null ? shade(c, black, 0.72) : shade(c, white, 0.3));
-  for (const [rows, top] of [[GEM_CROWN, 1], [GEM_CUP, CELL - 1 - GEM_CUP.length]] as [string[], number][]) {
+  for (const [rows, top] of [[GEM_CROWN, 1], [GEM_CUP, SPRITE - 1 - GEM_CUP.length]] as [string[], number][]) {
     rows.forEach((row, i) => {
       [...row].forEach((ch, j) => {
-        if (GEM_METAL[ch]) px[top + i][Math.floor((CELL - row.length) / 2) + j] = [...rgb(GEM_METAL[ch]), 255];
+        if (GEM_METAL[ch]) px[top + i][Math.floor((SPRITE - row.length) / 2) + j] = [...rgb(GEM_METAL[ch]), 255];
       });
     });
   }
@@ -125,9 +126,9 @@ export function griefSeedPixels(kind: number, special: string | null): Px {
   const body = shade([30, 25, 36], c, wrapped ? 0.3 : 0.08);
   const tones = [shade(body, white, 0.32), shade(body, white, 0.12), body, shade(body, black, 0.6)];
   let px = blank();
-  for (let y = 0; y < CELL; y++) {
-    for (let x = 0; x < CELL; x++) {
-      const u = (x + 0.5 - CELL / 2) / 5.4, v = (y + 0.5 - 10.5) / 4.8;
+  for (let y = 0; y < SPRITE; y++) {
+    for (let x = 0; x < SPRITE; x++) {
+      const u = (x + 0.5 - SPRITE / 2) / 5.4, v = (y + 0.5 - 10.5) / 4.8;
       const d = u * u + v * v;
       if (d > 1) continue;
       const light = 0.6 * u + 0.6 * v;   // low: lit from the top-left; high, at the edge: her rim light
@@ -141,11 +142,11 @@ export function griefSeedPixels(kind: number, special: string | null): Px {
   }
   for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]]) px[8 + dy][6 + dx] = [200, 196, 206, 255];   // the glint
   px = outline(px, special === null ? shade(c, black, 0.3) : shade(c, white, 0.35));
-  for (const [rows, top] of [[SEED_TOP, 0], [SEED_SPIKE, CELL - SEED_SPIKE.length]] as [string[], number][]) {
+  for (const [rows, top] of [[SEED_TOP, 0], [SEED_SPIKE, SPRITE - SEED_SPIKE.length]] as [string[], number][]) {
     rows.forEach((row, i) => {
       [...row].forEach((ch, j) => {
         const col = ch === "o" ? c : SEED_METAL[ch];
-        if (col) px[top + i][Math.floor((CELL - row.length) / 2) + j] = [...col, 255];
+        if (col) px[top + i][Math.floor((SPRITE - row.length) / 2) + j] = [...col, 255];
       });
     });
   }
