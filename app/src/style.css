@@ -25,7 +25,8 @@ body.maximized #app { border-radius: 0; }
   -webkit-user-select: none;
 }
 body[data-os="mac"] .titlebar { padding-left: 78px; }   /* room for the traffic lights */
-body[data-os="mac"] .titlebar .buttons { display: none; }
+body[data-os="mac"].fullscreen .titlebar { padding-left: 14px; }   /* (full screen hides them) */
+body[data-os="mac"] .titlebar .buttons { display: none; }   /* the native ones stand in (see tauri.macos.conf.json) */
 /* her soul gem, which shines; in dark, her grief seed, which doesn’t */
 .titlebar .gem { width: 26px; height: 26px; flex: none; display: flex; }   /* (a seed draws its own glow) */
 :root[data-theme="light"] .titlebar .gem { filter: drop-shadow(0 0 3px var(--accent)); }

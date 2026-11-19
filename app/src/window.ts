@@ -68,7 +68,7 @@ export class MagicaWindow implements WindowHost {
     document.body.dataset.os = o.os;
     root.innerHTML = `
       <header class="titlebar" data-tauri-drag-region>
-        <span class="gem"></span><span class="who" data-tauri-drag-region></span><span class="where" data-tauri-drag-region></span>
+        <span class="gem" data-tauri-drag-region></span><span class="who" data-tauri-drag-region></span><span class="where" data-tauri-drag-region></span>
         <span class="buttons"><button class="min" title="Minimise" tabindex="-1">–</button><button class="max" title="Maximise" tabindex="-1">□</button><button class="close" title="Close" tabindex="-1">✕</button></span>
       </header>
       <nav class="tabs" hidden></nav>
@@ -102,9 +102,12 @@ export class MagicaWindow implements WindowHost {
     this.writeMode();
   }
 
-  /** Maximised: square corners (rounded ones against the screen's edges looked chipped). */
+  /** Maximised: square corners (rounded ones against the screen's edges looked chipped). Full screen on macOS hides
+   * the traffic lights, so the title bar stops leaving room for them. */
   private async fitMaximized() {
-    document.body.classList.toggle("maximized", await this.appWindow.isMaximized().catch(() => false));
+    const full = this.os === "mac" && (await this.appWindow.isFullscreen().catch(() => false));
+    document.body.classList.toggle("fullscreen", full);
+    document.body.classList.toggle("maximized", full || (await this.appWindow.isMaximized().catch(() => false)));
   }
 
   // ── WindowHost ──
