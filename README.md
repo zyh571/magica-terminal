@@ -73,12 +73,12 @@ The integration covers bash (4+), zsh and PowerShell. Other shells (cmd.exe, WSL
 - `pair` opens a layout of Madoka and Homura
 - `magica` opens a layout of Madoka, Homura, Sayaka, Mami and Kyoko
 - `crush` opens a game of Magica Crush
-- `note` opens the notepad, auto-saved to `note.txt` in the config folder.
+- `note` opens the notepad, auto-saved to `note.txt` in the config folder
   - `<head>Title<head>` makes a header
   - `*word*` makes a word bold
-  - Ctrl+Z / Cmd+Z undoes.
-  - `note new line` adds a line without opening it.
-- `space [folder]` scans items in the folder and shows their disk usage. 
+  - Ctrl+Z / Cmd+Z undoes
+  - `note new line` adds a line without opening it
+- `space [folder]` scans items in the folder and shows their disk usage
 - Entering a folder with a `.env` sets all its `KEY=value` lines in the shell for convenience
 
 Programs that ask the terminal for light/dark mode get the current terminal theme.
