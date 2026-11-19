@@ -1,27 +1,25 @@
 # Magica Terminal
 
-A terminal where every pane belongs to a Puella Magi Madoka Magica character. Her HELLO! GOOD SMILE figure stands in
-the bottom-right corner, and the prompt, cursor and selection use her colour. It runs on Linux, macOS and Windows
-(Tauri: Rust for the terminals and files, xterm.js in the system web view for the window).
+A simple Magica Madoka inspired terminal. It runs on Linux, macOS and Windows
 
 ## Install
+Install after every `git pull` or an edit. Your notes, Crush score, settings and last session carry over.
 
-It builds from source with Rust and Node.js 20+; the installers offer to install whatever's missing.
-
-**Linux** (also needs WebKitGTK's development files; on Ubuntu the script offers to `apt install` them):
+**Linux** (tested on Ubuntu only)
 
 ```sh
 ./install.sh            # builds it, links ~/.local/bin/magica-terminal and adds it to your app launcher
 ./install.sh --default  # …and makes it the default terminal (Ubuntu's xdg-terminal-exec)
 ```
+If WebKitGTK development files are missing, it offers to install them with `apt install`. 
 
 **macOS:**
 
 ```sh
 ./install.sh   # builds Magica Terminal.app into ~/Applications and links ~/.local/bin/magica-terminal
 ```
+If macOS won't open it the first time, right-click it and choose Open.
 
-It's unsigned, so if macOS won't open it the first time, right-click it and choose Open.
 
 **Windows 11** (in PowerShell):
 
@@ -29,11 +27,9 @@ It's unsigned, so if macOS won't open it the first time, right-click it and choo
 .\install.ps1   # builds it into %LOCALAPPDATA%\Programs\magica-terminal, adds it to PATH and the Start Menu
 ```
 
-If Rust, Node.js or the C++ build tools are missing, it offers to install them with `winget` (the build tools take a
-while and ask for admin). If PowerShell won't run scripts, use `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
+If Rust, Node.js or the C++ build tools are missing, it offers to install them with `winget`.
+If PowerShell won't run scripts, use `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
 
-Run the installer again after `git pull` or an edit. It also removes what the old Python version installed (its
-`~/.bashrc` line and GNOME Shell extension); your notes, Crush score, settings and last session carry over.
 
 To uninstall the app without deleting your notes, settings, or saved sessions:
 
@@ -45,7 +41,7 @@ To uninstall the app without deleting your notes, settings, or saved sessions:
 .\uninstall.ps1      # Windows
 ```
 
-Pass `--purge` on Linux/macOS or `-Purge` on Windows to delete the saved data too.
+To delete the saved data as well, pass `--purge` on Linux/macOS or `-Purge` on Windows.
 
 ## Keys
 
@@ -70,29 +66,22 @@ On macOS, Ctrl+C still goes to the program and Option works as Meta (Option+B / 
 
 The integration covers bash (4+), zsh and PowerShell. Other shells (cmd.exe, WSL, fish) start plainly.
 
-- `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character. Their witch names work too:
-  `kriemhild`, `homulilly`, `oktavia`, `candeloro`, `ophelia`.
-- `kyubey` opens a root shell as Kyubey (`sudo`; on Windows `sudo` or `gsudo`); `exit` brings her back.
-- `pair` lays out Madoka | Homura; `magica` all five (in a new tab if the current one is split).
-- `crush` opens Magica Crush, a match-3 game, in that pane. Esc or q goes back to the prompt.
-- `note` opens the notepad over that pane: one plain sheet in the theme and her colour, saved as you type to
-  `note.txt` in the config folder. `<head>Title<head>` makes a header (listed down the left, click to jump) and
-  `*word*` makes a word bold; the tags show only while the cursor is on them. Ctrl+Z / Cmd+Z undoes. While it's open
-  the window stays on top of other windows, so a small window works as a sticky note. `note buy milk` adds a line
-  without opening it.
-- `space [folder]` shows what takes up the disk there: every item with a bar for its size, biggest first, filling in
-  while it scans. Click a folder to go in, double-click a file to open it, Backspace goes up (past where you started,
-  too), C cds the shell there, Esc or q goes back.
-- In a folder with a `.env`, its `KEY=value` lines are set in the shell. The first time, she asks; `y` / `n` is
-  remembered per folder in `env-trust` in the config folder (delete its line to be asked again). Leaving the folder
-  puts every key back as it was. The file is only read, never run.
+- To switch characters, use either standard or witch names. The resulting names depend on the current theme.
+  - Standard: `madoka`, `homura`, `sayaka`, `mami`, `kyoko`
+  - Witch: `kriemhild`, `homulilly`, `oktavia`, `candeloro`, `ophelia`
+- `kyubey` opens a root shell as Kyubey (`sudo`; on Windows `sudo` or `gsudo`)
+- `pair` opens a layout of Madoka and Homura
+- `magica` opens a layout of Madoka, Homura, Sayaka, Mami and Kyoko
+- `crush` opens a game of Magica Crush
+- `note` opens the notepad, auto-saved to `note.txt` in the config folder.
+  - `<head>Title<head>` makes a header
+  - `*word*` makes a word bold
+  - Ctrl+Z / Cmd+Z undoes.
+  - `note new line` adds a line without opening it.
+- `space [folder]` scans items in the folder and shows their disk usage. 
+- Entering a folder with a `.env` sets all its `KEY=value` lines in the shell for convenience
 
-From outside, `magica-terminal --crush` or `--note` opens a window with the game or notepad, and
-`magica-terminal -e CMD…` runs a command in its first pane. Typed inside a Magica pane, `--crush` and `--note` open in
-that pane.
-
-Programs that ask the terminal for light/dark mode get the current theme's answer; in Claude Code, pick
-**Auto (match terminal)** in `/theme`.
+Programs that ask the terminal for light/dark mode get the current terminal theme.
 
 ## Settings and files
 
