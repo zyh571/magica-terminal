@@ -2,7 +2,6 @@
 # Build and install Magica Terminal from this checkout (Linux and macOS). Run it again after `git pull` or an edit.
 #   ./install.sh            build, then put the app on your PATH and in your launcher
 #   ./install.sh --default  …and make it the default terminal (Linux: Ubuntu's xdg-terminal-exec)
-#   ./install.sh --uninstall remove the installed app and launcher (keeps settings and sessions)
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="$DIR/app"
@@ -11,24 +10,6 @@ OS="$(uname -s)"
 PATH="$HOME/.cargo/bin:$PATH"
 
 ask() { [ -t 0 ] && read -r -p "$1 [Y/n] " ans && [[ $ans != [nN]* ]]; }
-
-if [ "${1:-}" = "--uninstall" ]; then
-  rm -f "$HOME/.local/bin/$BIN_NAME"
-  if [ "$OS" = Darwin ]; then
-    rm -rf "$HOME/Applications/Magica Terminal.app"
-  else
-    apps="$HOME/.local/share/applications"
-    rm -f "$apps/$BIN_NAME.desktop"
-    update-desktop-database "$apps" 2>/dev/null || true
-    list="$HOME/.config/ubuntu-xdg-terminals.list"
-    if [ -f "$list" ]; then
-      { grep -vx "$BIN_NAME.desktop" "$list" || true; } > "$list.tmp"
-      mv "$list.tmp" "$list"
-    fi
-  fi
-  echo "uninstalled Magica Terminal (settings and sessions were kept)"
-  exit 0
-fi
 
 if [ "$OS" = Darwin ] && ! xcode-select -p >/dev/null 2>&1; then
   if ask "Building needs Xcode's command-line tools. Install them now?"; then

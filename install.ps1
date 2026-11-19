@@ -1,28 +1,9 @@
 # Build and install Magica Terminal from this checkout (Windows). Run it again after `git pull` or an edit.
 #   .\install.ps1
-#   .\install.ps1 -Uninstall   remove the installed app and shortcut (keeps settings and sessions)
-param([switch]$Uninstall)
-
 $ErrorActionPreference = 'Stop'
 $dir = Join-Path $PSScriptRoot 'app'
 $binName = ([regex]::Match((Get-Content -Raw (Join-Path $dir 'core\src\paths.rs')), 'pub const BIN_NAME: &str = "(.*)";')).Groups[1].Value
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
-
-$target = Join-Path $env:LOCALAPPDATA 'Programs\magica-terminal'
-$lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Magica Terminal.lnk'
-if ($Uninstall) {
-  if (Get-Process -Name $binName -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$target\*" }) {
-    Write-Host 'Magica Terminal is running; close its windows and run .\install.ps1 -Uninstall again.'
-    exit 1
-  }
-  Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $lnk -Force -ErrorAction SilentlyContinue
-  $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
-  $kept = @($userPath -split ';' | Where-Object { $_ -and $_.TrimEnd('\') -ne $target.TrimEnd('\') })
-  [Environment]::SetEnvironmentVariable('PATH', ($kept -join ';'), 'User')
-  Write-Host 'uninstalled Magica Terminal (settings and sessions were kept)'
-  exit 0
-}
 
 function Find-Missing {
   $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -63,6 +44,7 @@ try {
   if ($LASTEXITCODE) { throw 'the build failed' }
 } finally { Pop-Location }
 
+$target = Join-Path $env:LOCALAPPDATA 'Programs\magica-terminal'
 if (Get-Process -Name $binName -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$target\*" }) {
   Write-Host 'Magica Terminal is running; close its windows and run .\install.ps1 again.'
   exit 1
@@ -78,6 +60,7 @@ if (-not ($userPath -split ';' | Where-Object { $_ -eq $target })) {
   [Environment]::SetEnvironmentVariable('PATH', "$userPath;$target", 'User')
   Write-Host "added $target to your PATH (new shells will see it)"
 }
+$lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Magica Terminal.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $s = $shell.CreateShortcut($lnk)
 $s.TargetPath = Join-Path $target "$binName.exe"

@@ -38,12 +38,14 @@ Run the installer again after `git pull` or an edit. It also removes what the ol
 To uninstall the app without deleting your notes, settings, or saved sessions:
 
 ```sh
-./install.sh --uninstall       # Linux or macOS
+./uninstall.sh       # Linux or macOS
 ```
 
 ```powershell
-.\install.ps1 -Uninstall      # Windows
+.\uninstall.ps1      # Windows
 ```
+
+Pass `--purge` on Linux/macOS or `-Purge` on Windows to delete the saved data too.
 
 ## Keys
 
