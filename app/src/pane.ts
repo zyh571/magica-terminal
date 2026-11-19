@@ -63,6 +63,7 @@ export class Pane implements PaneHost {
   private pending: string[] = [];   // typed or answered before the shell started
   private fit = new FitAddon();
   private search = new SearchAddon();
+  private webgl: WebglAddon | null = null;
   private figure: Figure;
   private searchBar: HTMLInputElement | null = null;
   private cmdStart: number | null = null;
@@ -103,6 +104,10 @@ export class Pane implements PaneHost {
       allowProposedApi: true,
       fontFamily: win.fontFamily(),
       fontSize: win.fontSize(),
+      // TUIs use ANSI white/bright-black and sometimes their own RGB colours for ordinary copy. On light grounds,
+      // keep those readable even when an application's palette is too faint. Bold is weight, not a palette switch.
+      minimumContrastRatio: win.theme() === "light" ? 4.5 : 1,
+      drawBoldTextInBrightColors: false,
       scrollback: 10000,
       cursorBlink: false,
       macOptionIsMeta: true,
@@ -118,11 +123,6 @@ export class Pane implements PaneHost {
     this.term.unicode.activeVersion = "11";
     this.fitCells();
     this.term.open(host);
-    try {
-      const gl = new WebglAddon();
-      gl.onContextLoss(() => gl.dispose());
-      this.term.loadAddon(gl);
-    } catch { /* no WebGL here (some WebKitGTK setups): xterm's own renderer is fine */ }
     // the window's shortcuts aren't the program's; everything else is
     this.term.attachCustomKeyEventHandler((e) => actionFor(e, win.os === "mac" ? "mac" : "other") === null);
     this.term.options.linkHandler = { activate: (e, uri) => this.clicked(e) && openUrl(uri).catch(() => {}), allowNonHttpProtocols: true };
@@ -308,6 +308,21 @@ export class Pane implements PaneHost {
     else this.term.focus();
   }
 
+  /** Keep one renderer across themes: switching renderers changes glyph rasterisation and makes light mode's
+   * apparent character spacing differ from dark mode. */
+  private syncRenderer() {
+    if (this.webgl) return;
+    try {
+      const gl = new WebglAddon();
+      gl.onContextLoss(() => {
+        if (this.webgl === gl) this.webgl = null;
+        gl.dispose();
+      });
+      this.term.loadAddon(gl);
+      this.webgl = gl;
+    } catch { /* no WebGL here (some WebKitGTK setups): xterm's own renderer is fine */ }
+  }
+
   restyle() {
     const s = this.settings, theme = this.win.theme(), t = THEMES[theme];
     const active = this.win.isActive(this);
@@ -315,7 +330,9 @@ export class Pane implements PaneHost {
     // with several panes: the focused one gets a light tint of her colour; the others an optional veil
     const bg = multi && active ? mix(mix(t.bg, "#ffffff", s.focus_brighten[theme]), this.colour(), s.focus_tint) : t.bg;
     if (this.term.options.allowTransparency !== seeThrough(theme)) this.term.options.allowTransparency = seeThrough(theme);
+    this.term.options.minimumContrastRatio = theme === "light" ? 4.5 : 1;
     this.term.options.theme = xtermTheme(theme, this.colour(), active, s, bg);
+    this.syncRenderer();
     this.el.style.setProperty("--pane-bg", bg);
     this.el.style.setProperty("--her", this.colour());
     this.el.style.setProperty("--veil", multi && !active ? s.unfocused_overlay : "transparent");

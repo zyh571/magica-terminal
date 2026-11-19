@@ -63,7 +63,9 @@ describe("palette slots", () => {
   test("light: text, and the ANSI colours programs use for text, are readable", () => {
     const t = THEMES.light;
     expect(contrast(t.fg, t.bg)).toBeGreaterThanOrEqual(10);
+    expect(contrast(t.dim, t.bg)).toBeGreaterThanOrEqual(4.5);
     [1, 2, 3, 4, 5, 6].forEach((i) => expect(contrast(t.palette[i], t.bg)).toBeGreaterThanOrEqual(6.5));
+    [7, 8].forEach((i) => expect(contrast(t.palette[i], t.bg)).toBeGreaterThanOrEqual(6));
     [9, 10, 11, 12, 13, 14].forEach((i) => expect(contrast(t.palette[i], t.bg)).toBeGreaterThanOrEqual(5));
   });
   test("dark: see-through, in the theme's colour (reverse video isn't black)", () => {

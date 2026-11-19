@@ -1,9 +1,24 @@
 // Her soul gem in light, her witch's grief seed in dark (public/gems; Kyubey is his pixel sprite in both): for the
 // title bar and the taskbar icon. Grief seeds are all black and silver, so each one's silver takes her witch's colour
 // and she glows in it.
-import type { CharName } from "./characters";
+import { characterNamed, type CharName } from "./characters";
 import { kyubeyPixels, outline, spriteCanvas } from "./crush/sprites";
-import { hexRgb, type ThemeName } from "./theme";
+import { hexRgb, mix, THEMES, type ThemeName } from "./theme";
+
+// Corrections from each source seed's alpha-weighted principal axis to the shared 58-degree taskbar angle.
+const SEED_TURN: Partial<Record<CharName, number>> = {
+  madoka: 1.3, homura: 0.3, sayaka: 4.6, mami: -1.3, kyoko: -1.3,
+};
+
+/** The stable, muted backing for her taskbar icon. It deliberately uses her light-side colour in both themes. */
+export function taskbarIconBackground(name: CharName): string {
+  if (name === "kyubey") return "#7a7a80";
+  return mix(characterNamed(name)!.light, THEMES.light.bg, 0.62);
+}
+
+export function taskbarSeedTurn(name: CharName): number {
+  return SEED_TURN[name] ?? 0;
+}
 
 /** Her picture's URL, or null for Kyubey (who has no gem). */
 export function gemUrl(name: CharName, theme: ThemeName): string | null {
@@ -81,8 +96,49 @@ export function gemElement(name: CharName, theme: ThemeName, colour: string, css
   return shown;
 }
 
-/** Her picture as size x size RGBA, for the taskbar. */
+/** Her picture on its muted character circle as size x size RGBA, for the taskbar. */
 export async function gemIcon(name: CharName, theme: ThemeName, colour: string, size: number): Promise<Uint8Array> {
-  const c = await picture(name, theme, colour, size);
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const g = c.getContext("2d")!;
+  const centre = size / 2, diameter = size * 0.96;
+  g.fillStyle = taskbarIconBackground(name);
+  g.beginPath();
+  g.arc(centre, centre, diameter / 2, 0, Math.PI * 2);
+  g.fill();
+
+  if (name === "kyubey") {
+    const sp = spriteCanvas(outline(kyubeyPixels(), [40, 36, 48]));
+    const d = diameter * 0.82;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(sp, centre - d / 2, centre - d / 2, d, d);
+  } else {
+    const seed = theme === "dark";
+    const img = await load(gemUrl(name, theme)!);
+    // Gems sit upright across the horizontal diameter. A seed's complete source-canvas diagonal spans the circle's
+    // diameter, so its finial and spike remain visible after the small rotation that normalises all five to 58°.
+    const h = seed
+      ? diameter * img.naturalHeight / Math.hypot(img.naturalWidth, img.naturalHeight)
+      : diameter * 0.82;
+    const w = h * img.naturalWidth / img.naturalHeight;
+    const art = document.createElement("canvas");
+    art.width = Math.max(1, Math.round(w));
+    art.height = Math.max(1, Math.round(h));
+    const a = art.getContext("2d")!;
+    a.imageSmoothingQuality = "high";
+    a.drawImage(img, 0, 0, art.width, art.height);
+    if (seed) {
+      const px = a.getImageData(0, 0, art.width, art.height);
+      tintPixels(px.data, colour);
+      a.putImageData(px, 0, 0);
+      g.shadowColor = colour;
+      g.shadowBlur = size * 0.045;
+    }
+    g.save();
+    g.translate(centre, centre);
+    if (seed) g.rotate(taskbarSeedTurn(name) * Math.PI / 180);
+    g.drawImage(art, -art.width / 2, -art.height / 2);
+    g.restore();
+  }
   return new Uint8Array(c.getContext("2d")!.getImageData(0, 0, size, size).data.buffer);
 }

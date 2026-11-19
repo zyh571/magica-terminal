@@ -20,12 +20,12 @@ export const THEMES: Record<ThemeName, Theme> = {
       "#3a3029", "#d27a68", "#9cad7a", "#dcb468", "#8ca3bd", "#c095ae", "#8db5a8", "#d9cfbd",
       "#75695c", "#e3917f", "#b2c38f", "#ecc982", "#a4b9cf", "#d2abc1", "#a5c9bc", "#f5ecdc"],
   },
-  // (light is darker than a mirror of dark: dark text on a light ground reads thinner. Colours ≥ 6.5:1 on bg, the
-  // bright ones ≥ 5:1, white 3.6:1 and bright black 4.6:1)
+  // Light is darker than a mirror of dark: dark text on a light ground reads thinner. Keep the two neutral ANSI
+  // slots TUIs lean on (white and bright black) at 6:1 too, rather than treating them as decorative greys.
   light: {
-    bg: "#f6efe1", fg: "#3d342d", dim: "#847b6d", sel_fg: "#fbf7ee", palette: [
-      "#3b322b", "#8b3d32", "#475b32", "#6b5016", "#405771", "#714862", "#385b54", "#847c6c",
-      "#746a5d", "#a34c3c", "#576d3e", "#7f6220", "#4e6883", "#845975", "#466d66", "#fbf7ee"],
+    bg: "#f6efe1", fg: "#3d342d", dim: "#746b5d", sel_fg: "#fbf7ee", palette: [
+      "#3b322b", "#8b3d32", "#475b32", "#6b5016", "#405771", "#714862", "#385b54", "#5c544a",
+      "#62594e", "#a34c3c", "#576d3e", "#7f6220", "#4e6883", "#845975", "#466d66", "#fbf7ee"],
   },
 };
 
