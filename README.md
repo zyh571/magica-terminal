@@ -5,13 +5,17 @@ A simple Magica Madoka inspired terminal. It runs on Linux, macOS and Windows
 ## Install
 Install after every `git pull` or an edit. Your notes, Crush score, settings and last session carry over.
 
+The checkout is all you need. When something the build needs is missing or too old, the installer offers to install it:
+a C compiler (Xcode's command-line tools on macOS), Rust 1.90+ (rustup), Node.js 22.12+ (a private copy, no password)
+and, on Linux, WebKitGTK. Pass `--yes` (`-Yes` on Windows) to install them without being asked.
+
 **Linux** (tested on Ubuntu only)
 
 ```sh
 ./install.sh            # builds it, links ~/.local/bin/magica-terminal and adds it to your app launcher
 ./install.sh --default  # …and makes it the default terminal (Ubuntu's xdg-terminal-exec)
 ```
-If WebKitGTK development files are missing, it offers to install them with `apt install`. 
+WebKitGTK comes from apt, dnf, pacman or zypper. It needs WebKitGTK 4.1, so Ubuntu 22.04+ or Debian 12+.
 
 **macOS:**
 
@@ -27,7 +31,7 @@ If macOS won't open it the first time, right-click it and choose Open.
 .\install.ps1   # builds it into %LOCALAPPDATA%\Programs\magica-terminal, adds it to PATH and the Start Menu
 ```
 
-If Rust, Node.js or the C++ build tools are missing, it offers to install them with `winget`.
+It also installs the Visual Studio C++ build tools and the WebView2 runtime when missing (each asks for admin once).
 If PowerShell won't run scripts, use `powershell -ExecutionPolicy Bypass -File .\install.ps1`.
 
 
