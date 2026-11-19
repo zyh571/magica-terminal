@@ -38,12 +38,10 @@ Run the installer again after `git pull` or an edit. It also removes what the ol
 To uninstall the app without deleting your notes, settings, or saved sessions:
 
 ```sh
-./install.sh --uninstall       # Linux or macOS
+magica-terminal uninstall
 ```
 
-```powershell
-.\install.ps1 -Uninstall      # Windows
-```
+Add `--purge` to delete those too. The command is the same on Linux, macOS and Windows.
 
 ## Keys
 

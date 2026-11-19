@@ -1,4 +1,5 @@
-//! The command line: `magica-terminal [--crush | --note] [-e | --] [CMD ARGS…]`.
+//! The command line: `magica-terminal [--crush | --note] [-e | --] [CMD ARGS…]`, or `magica-terminal uninstall
+//! [--purge]`.
 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -14,10 +15,18 @@ pub enum Cli {
     Window { overlay: Option<Overlay>, command: Option<Vec<String>> },
     /// `--crush` / `--note` typed inside a Magica pane: that pane opens it (via the escape sequence).
     InPane(Overlay),
+    /// Remove the installed app; `purge` also removes its notes, settings and saved session.
+    Uninstall { purge: bool },
 }
 
 /// `in_pane`: started from a shell inside Magica Terminal (`MAGICA_APP` is set).
 pub fn parse(args: &[String], in_pane: bool) -> Cli {
+    if matches!(args.first().map(String::as_str), Some("uninstall"))
+        && args.get(1).is_none_or(|a| a == "--purge")
+        && args.len() <= 2
+    {
+        return Cli::Uninstall { purge: args.get(1).is_some() };
+    }
     let mut args = args;
     let overlay = match args.first().map(String::as_str) {
         Some("--crush") => Some(Overlay::Crush),
@@ -70,6 +79,13 @@ mod tests {
         assert_eq!(p(&["--", "htop"], false), Cli::Window { overlay: None, command: cmd(&["htop"]) });
         assert_eq!(p(&["htop", "-d", "5"], false), Cli::Window { overlay: None, command: cmd(&["htop", "-d", "5"]) });
         assert_eq!(p(&["-e"], false), Cli::Window { overlay: None, command: None });
+    }
+
+    #[test]
+    fn uninstall() {
+        assert_eq!(p(&["uninstall"], false), Cli::Uninstall { purge: false });
+        assert_eq!(p(&["uninstall", "--purge"], true), Cli::Uninstall { purge: true });
+        assert!(matches!(p(&["uninstall", "later"], false), Cli::Window { .. }));
     }
 
     #[test]

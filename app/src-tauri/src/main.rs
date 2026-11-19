@@ -11,6 +11,13 @@ fn main() {
     match parse(&args, in_pane) {
         Cli::InPane(o) => tell_pane(in_pane_sequence(o).as_bytes()),
         Cli::Window { overlay, command } => magica_terminal::run(overlay, command),
+        Cli::Uninstall { purge } => match magica_core::uninstall::run(purge) {
+            Ok(message) => tell_pane(message.as_bytes()),
+            Err(error) => {
+                tell_pane(format!("could not uninstall Magica Terminal: {error}\n").as_bytes());
+                std::process::exit(1);
+            }
+        },
     }
 }
 
