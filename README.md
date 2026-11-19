@@ -35,6 +35,16 @@ while and ask for admin). If PowerShell won't run scripts, use `powershell -Exec
 Run the installer again after `git pull` or an edit. It also removes what the old Python version installed (its
 `~/.bashrc` line and GNOME Shell extension); your notes, Crush score, settings and last session carry over.
 
+To uninstall the app without deleting your notes, settings, or saved sessions:
+
+```sh
+./install.sh --uninstall       # Linux or macOS
+```
+
+```powershell
+.\install.ps1 -Uninstall      # Windows
+```
+
 ## Keys
 
 | | Linux, Windows | macOS |
