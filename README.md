@@ -58,7 +58,8 @@ On macOS, Ctrl+C still goes to the program and Option works as Meta (Option+B / 
 
 The integration covers bash (4+), zsh and PowerShell. Other shells (cmd.exe, WSL, fish) start plainly.
 
-- `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character.
+- `madoka`, `homura`, `sayaka`, `mami`, `kyoko` switch the pane's character. Their witch names work too:
+  `kriemhild`, `homulilly`, `oktavia`, `candeloro`, `ophelia`.
 - `kyubey` opens a root shell as Kyubey (`sudo`; on Windows `sudo` or `gsudo`); `exit` brings her back.
 - `pair` lays out Madoka | Homura; `magica` all five (in a new tab if the current one is split).
 - `crush` opens Magica Crush, a match-3 game, in that pane. Esc or q goes back to the prompt.

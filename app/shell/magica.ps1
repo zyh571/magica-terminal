@@ -218,6 +218,9 @@ if ($env:MAGICA_APP -eq 'tauri' -and $env:MAGICA_CHAR) {
     foreach ($c in 'madoka', 'homura', 'sayaka', 'mami', 'kyoko') {
       Set-Item -Path "function:global:$c" -Value ([scriptblock]::Create(
         "if (`$env:MAGICA_CHAR -ne '$c') { `$env:MAGICA_CHAR = '$c'; _magica_osc '9973;set;$c'; Clear-Host }"))
+      # The witch name is an alias for the same character switch.
+      $witch = $global:_magica_witches[$c]
+      Set-Item -Path "function:global:$witch" -Value ([scriptblock]::Create("& '$c' @args"))
     }
     # `pair` (Madoka | Homura) / `magica` (all five): this pane becomes Madoka and the terminal builds the layout around it
     foreach ($l in 'pair', 'magica') {

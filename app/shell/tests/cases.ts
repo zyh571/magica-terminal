@@ -32,6 +32,13 @@ export function shellCases(kind: Kind) {
       expect(run("homura")).toContain(OSC("9973;set;homura"));
       expect(run("madoka")).not.toContain("9973");   // already her
     });
+    test("witch names are character commands", () => {
+      const witches = { kriemhild: "madoka", homulilly: "homura", oktavia: "sayaka", candeloro: "mami", ophelia: "kyoko" };
+      for (const [witch, character] of Object.entries(witches)) {
+        const out = run(witch, { MAGICA_CHAR: character === "madoka" ? "homura" : "madoka" });
+        expect(out).toContain(OSC(`9973;set;${character}`));
+      }
+    });
     test("layouts become madoka", () => {
       const out = run("homura; pair");
       expect(out).toContain(OSC("9973;layout;pair"));

@@ -186,6 +186,12 @@ if [[ $MAGICA_APP == tauri && -n $MAGICA_CHAR ]]; then
       eval "$_magica_c() { [[ \$MAGICA_CHAR == $_magica_c ]] && return; MAGICA_CHAR=$_magica_c; _magica_prompt; _magica_osc '9973;set;$_magica_c'; clear; }"
     done
     unset _magica_c
+    # Witch names work too, while still sending the character name understood by the terminal.
+    for _magica_a in kriemhild:madoka homulilly:homura oktavia:sayaka candeloro:mami ophelia:kyoko; do
+      _magica_w=${_magica_a%%:*} _magica_c=${_magica_a#*:}
+      eval "$_magica_w() { $_magica_c \"\$@\"; }"
+    done
+    unset _magica_a _magica_w _magica_c
     for _magica_l in pair magica; do
       eval "$_magica_l() { MAGICA_CHAR=madoka; _magica_prompt; _magica_osc '9973;layout;$_magica_l'; clear; }"
     done

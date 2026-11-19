@@ -1,8 +1,8 @@
 # Magica Terminal shell integration (bash 4+). Magica Terminal loads this itself when it starts bash (after ~/.bashrc);
 # it does nothing anywhere else. It talks to the terminal with escape sequences (app/src/protocol.ts):
 #   OSC 9973;set;<name> / layout;<pair|magica> / crush / note / space;<folder>   OSC 133;A|B|C|D;<status>   OSC 7;file://…
-# Typing a character's name (madoka, homura, sayaka, mami, kyoko) switches this pane to her; `kyubey` asks for your sudo
-# password, then turns the pane into Kyubey with a root shell until you exit it.
+# Typing a character's or witch's name switches this pane to her; `kyubey` asks for your sudo password, then turns the
+# pane into Kyubey with a root shell until you exit it.
 if [ "$MAGICA_APP" = tauri ] && [ -n "$MAGICA_CHAR" ] && [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
   # each character's palette slots (name, text, path), so earlier lines keep her colours after a switch and
   # light/dark recolours them; 118 is Kyubey's accent
@@ -190,6 +190,12 @@ if [ "$MAGICA_APP" = tauri ] && [ -n "$MAGICA_CHAR" ] && [ "${BASH_VERSINFO[0]:-
       eval "$_magica_c() { [ \"\$MAGICA_CHAR\" = $_magica_c ] && return; MAGICA_CHAR=$_magica_c; _magica_prompt; _magica_osc '9973;set;$_magica_c'; clear; }"
     done
     unset _magica_c
+    # Witch names work too, while still sending the character name understood by the terminal.
+    for _magica_a in kriemhild:madoka homulilly:homura oktavia:sayaka candeloro:mami ophelia:kyoko; do
+      _magica_w=${_magica_a%%:*} _magica_c=${_magica_a#*:}
+      eval "$_magica_w() { $_magica_c \"\$@\"; }"
+    done
+    unset _magica_a _magica_w _magica_c
     # `pair` (Madoka | Homura) / `magica` (all five): this pane becomes Madoka and the terminal builds the layout around it
     for _magica_l in pair magica; do
       eval "$_magica_l() { MAGICA_CHAR=madoka; _magica_prompt; _magica_osc '9973;layout;$_magica_l'; clear; }"
